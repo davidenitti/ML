@@ -54,7 +54,7 @@ biases = {}
 dim = 20
 pred, code = autoenc(x, [n_input, 200, 110, 70, 30, dim, 30, 70, 110, 200, n_input], weights, biases)
 pred = pred * 0.5 + 0.5 # pred is between 0 and 1
-loss = tf.reduce_mean((pred - x) ** 2)
+loss = tf.reduce_mean((pred - x) ** 2) # this can be replaced with cross entropy loss
 for ww in weights:
     loss += tf.nn.l2_loss(weights[ww]) * 0.000001
 optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate, momentum=0.7).minimize(loss,

@@ -14,3 +14,5 @@ How to run the code:
 
 Note: the script plots the morphing while it learns the autoencoder.
 Therefore, wait few seconds to see better "morphing" results.
+
+![alt tag](morph.png)
