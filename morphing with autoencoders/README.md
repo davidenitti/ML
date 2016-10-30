@@ -23,4 +23,5 @@ numpy
 Note: the script plots the morphing while it learns the autoencoder.
 Therefore, wait few seconds to see better "morphing" results.
 
+###Output
 ![alt tag](morph.png)
