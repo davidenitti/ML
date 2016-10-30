@@ -9,6 +9,7 @@ The morphing between two images (e.g., digits) is performed as follows:
 4. plot the reconstruction of the new code using the autoencoder
 
 How to run the code:
+
 ```python morphing_mnist.py```  
 
 Note: the script plots the morphing while it learns the autoencoder.
