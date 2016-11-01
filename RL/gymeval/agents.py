@@ -4,13 +4,13 @@ Created on Jun 26, 2016
 @author: Davide Nitti
 '''
 
-import RL.gym
+import gym
 import logging
 import numpy as np
 import math, time
 import tensorflow as tf
 import pickle
-from RL.gym import spaces
+from gym import spaces
 import os.path
 
 
@@ -113,8 +113,8 @@ class deepQAgent(object):
             np.random.seed(self.config["seed"])
             print "seed", self.config["seed"]
         # print self.config["initial_learnrate"]
-        self.isdiscrete = isinstance(self.action_space, RL.gym.spaces.Discrete)
-        if not isinstance(self.action_space, RL.gym.spaces.Discrete):
+        self.isdiscrete = isinstance(self.action_space, gym.spaces.Discrete)
+        if not isinstance(self.action_space, gym.spaces.Discrete):
             raise Exception('Observation space {} incompatible with {}. (Only supports Discrete action spaces.)'.format(
                 observation_space, self))
 
@@ -509,7 +509,7 @@ class deepQAgentCont(object):
         self.action_space = action_space
         self.reward_range = reward_range
         # self.isdiscrete = isinstance(self.action_space, gym.spaces.Discrete)
-        if not isinstance(self.action_space, RL.gym.spaces.Box):
+        if not isinstance(self.action_space, gym.spaces.Box):
             raise Exception(
                 'Observation space {} incompatible with {}. (Only supports Continuous action spaces.)'.format(
                     observation_space, self))

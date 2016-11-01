@@ -28,8 +28,8 @@ if __name__ == '__main__':
         seed = None
     nameenv = args.target
 
-    reward_threshold = RL.gym.envs.registry.spec(nameenv).reward_threshold
-    env = RL.gym.make(nameenv)
+    reward_threshold = gym.envs.registry.spec(nameenv).reward_threshold
+    env = gym.make(nameenv)
 
     if seed is not None:
         env.seed(seed)
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     resultsdir = './' + nameenv
 
     env.monitor.start(resultsdir, force=True)
-    print env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range, RL.gym.envs.registry.spec(nameenv).trials
+    print env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range, gym.envs.registry.spec(nameenv).trials
     if nameenv == 'Acrobot-v0':
         env.reward_range = (-1., 0.)
 
