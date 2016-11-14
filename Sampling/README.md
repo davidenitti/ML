@@ -14,7 +14,7 @@ estimate is zero, i.e. a single sample is sufficient to obtain the exact value.
 
 The task is to estimate the integral of a function f(x).
 The optimal proposal distribution is f(x)/M, where M is the integral of f(x).
-Thus the optimal proposal distribution is f(x) normalized.
+Thus, the optimal proposal distribution is f(x) normalized.
 
 ##kernel.py
 
