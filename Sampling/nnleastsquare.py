@@ -86,7 +86,7 @@ while True:
 
     if count % 1 == 0:
 
-        ax.plot(X_plot, normtarget(X_plot), label='normalized f(x)')
+        ax.plot(X_plot, normtarget(X_plot), label='normalized f(x) = optimal proposal')
         ax.plot(X_plot, target(X_plot), label='f(x) to integrate')
         pr = proposal(Centroids, W, Centroids, bandwidth)
         ax.scatter(X, WX / 10., s=10, marker='x', color='red', label="weight")
@@ -96,7 +96,7 @@ while True:
         ax.plot(Centroids, -0.01 - 0.1 * np.random.random(Centroids.shape[0]), '+k')
 
         ax.set_xlim(-0.01, 1.01)
-        ax.set_ylim(-0.2, 2.5)
+        ax.set_ylim(-0.2, 3)
         plt.draw()
         plt.pause(0.1)
         ax.clear()
