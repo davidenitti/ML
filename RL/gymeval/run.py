@@ -4,6 +4,9 @@ Created on Jun 26, 2016
 @author: Davide Nitti
 '''
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import argparse
 import matplotlib.pyplot as plt
 import  time
@@ -21,7 +24,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    print args
+    print (args)
     numepisodes = int(args.episodes)
     if args.seed is not None:
         seed = int(args.seed)
@@ -38,8 +41,8 @@ if __name__ == '__main__':
 
     resultsdir = './' + nameenv
 
-    env.monitor.start(resultsdir, force=True)
-    print env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range, gym.envs.registry.spec(nameenv).trials
+    env = gym.wrappers.Monitor(env, resultsdir, force=True)# env.monitor.start(resultsdir, force=True)
+    print(env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range, gym.envs.registry.spec(nameenv).trials)
     if nameenv == 'Acrobot-v0':
         env.reward_range = (-1., 0.)
 
@@ -59,24 +62,44 @@ if __name__ == '__main__':
             "hiddenlayers": [300],
             "regularization": [0.00001, 0.00000001],
             "momentum": 0.05,
+            "scale": 3.,
             "file": None,
+            "seed": seed}
+    elif nameenv == 'CartPole-v0':
+        params = {
+            "memsize": 3000,
+            "scalereward": 1.,
+            "probupdate": .25,
+            "lambda": 0.,
+            "past": 0,
+            "eps": 0.6,  # Epsilon in epsilon greedy policies
+            "decay": 0.997,  # Epsilon decay in epsilon greedy policies
+            "initial_learnrate": 0.0025,
+            "decay_learnrate": 0.998,
+            "discount": 0.99,
+            "batch_size": 50,
+            "hiddenlayers": [300],
+            "regularization": [0.000000, 0.00000000],
+            "momentum": 0.0,
+            "file": None,
+            "scale": None,
             "seed": seed}
     else:
         params = {
-            "memsize": 150000,
+            "memsize": 3000,
             "scalereward": 1.,
             "probupdate": .25,
-            "lambda": 0.15,
+            "lambda": 0.,
             "past": 0,
             "eps": 0.45,  # Epsilon in epsilon greedy policies
             "decay": 0.993,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.012,
+            "initial_learnrate": 0.005,
             "decay_learnrate": 0.997,
             "discount": 0.99,
             "batch_size": 75,
             "hiddenlayers": [300],
-            "regularization": [0.00001, 0.00000001],
-            "momentum": 0.05,
+            "regularization": [0.0000, 0.0000000],
+            "momentum": 0.0,
             "file": None,
             "seed": seed}
     agent = agents.deepQAgent(env.observation_space, env.action_space, env.reward_range, **params)
@@ -94,11 +117,11 @@ if __name__ == '__main__':
     totrewavglist = []
     costlist = []
     showevery = 10
-    for episode in xrange(numepisodes):
+    for episode in range(numepisodes):
         if episode % showevery == 0:
             render = True
             eps = None
-            print 'episode', episode, 'l rate', agent.getlearnrate()
+            print ('episode', episode, 'l rate', agent.getlearnrate())
             oldavg = avg
         else:
             render = False
@@ -109,7 +132,7 @@ if __name__ == '__main__':
         if episode == 0:
             avg = total_rew
         if episode % 50 == 0:
-            print agent.config
+            print(agent.config)
         if episode % 1 == 0:
             listob = np.array(listob)
             listact = np.array(listact)
@@ -123,9 +146,9 @@ if __name__ == '__main__':
             costlist.append(cost / steps)
             plotlast = 200 + episode % 50
             ax[0].clear()
-            ax[0].set_xlim(max(-1, len(totrewavglist) / 50 * 50 - 150), len(totrewavglist) / 50 * 50 + 50)
-            ax[0].set_ylim(min(totrewlist[max(0, len(totrewavglist) / 50 * 50 - 150):]) - 5,
-                           max(totrewlist[max(0, len(totrewavglist) / 50 * 50 - 150):]) + 5)
+            ax[0].set_xlim(max(-1, len(totrewavglist) // 50 * 50 - 150), len(totrewavglist) // 50 * 50 + 50)
+            ax[0].set_ylim(min(totrewlist[max(0, len(totrewavglist) // 50 * 50 - 150):]) - 5,
+                           max(totrewlist[max(0, len(totrewavglist) // 50 * 50 - 150):]) + 5)
             ax[0].plot([0, len(totrewavglist) + 100], [reward_threshold, reward_threshold], color='green')
 
             ax[0].plot(range(len(totrewlist)), totrewlist, color='red')
@@ -135,11 +158,11 @@ if __name__ == '__main__':
                        [np.mean(np.array(totrewlist[-100:])), np.mean(np.array(totrewlist[-100:]))], color='black')
             plt.draw()
             plt.pause(.01)
-        print render, 'time', (time.time() - startt) / steps * 100., 'steps', steps, 'total reward', total_rew / \
+        print (render, 'time', (time.time() - startt) / steps * 100., 'steps', steps, 'total reward', total_rew / \
             agent.config['scalereward'], 'avg', avg / agent.config['scalereward'], cost / steps, 'eps',\
-            agent.epsilon(eps), len(agent.memory)
+            agent.epsilon(eps), len(agent.memory))
     # fig.savefig('last.png')
     env.monitor.close()
-    print agent.config
+    print(agent.config)
     # gym.upload(resultsdir, api_key='YOURAPI')
 
