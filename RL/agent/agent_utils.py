@@ -1,0 +1,228 @@
+import numpy as np
+import time
+import cv2
+import threading
+
+
+def onehot(i, n):
+    out = np.zeros(n)
+    out[i] = 1.
+    return out
+
+
+def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, discount=1,
+               learn=True, sleep=0.):
+    if num_steps == None:
+        num_steps = env.spec.timestep_limit
+    total_rew = 0.
+    total_rew_discount = 0.
+    cost = 0.
+    if 'scaling' in agent.config:
+        scaling = agent.config['scaling']
+    else:
+        scaling = 'none'
+    ob = env.reset()
+    ob = preprocess(ob, agent.observation_space, agent.scaled_obs, type=scaling)
+
+    if agent.config['terminal_life']:
+        last_lives = -1
+
+    if useConv == False:
+        ob = ob.reshape(-1, )
+    ob1 = np.copy(ob)
+    for _ in range(agent.config["past"]):
+        ob1 = np.concatenate((ob1, ob), 0)
+    # agent.memoryLock.acquire()
+    # startind=agent.sizemem
+    # agent.memoryLock.release()
+    if 'transition_net' in agent.config and agent.config['transition_net']: #fixme render and
+        agent.state_list=[[],[]]
+        update_state = True
+    else:
+        update_state = False
+    for t in range(num_steps):
+        if sleep > 0:
+            time.sleep(sleep)
+        if agent.config['policy']:
+            a = agent.actpolicy(ob1, episode)
+        else:
+            a = agent.act(ob1, episode,update_state=update_state)
+
+        start_time = time.time()
+        (obnew, rr, done, _info) = env.step(a)
+        start_time2 = time.time()
+        if agent.config['terminal_life']:
+            if _info['ale.lives'] < last_lives:
+                terminal_memory = True
+            else:
+                terminal_memory = done
+            last_lives = _info['ale.lives']
+        else:
+            terminal_memory = done
+
+        #print(reward, done,terminal_memory, _info['ale.lives'])
+        obnew = preprocess(obnew, agent.observation_space, agent.scaled_obs, type=scaling)
+        reward = rr*agent.config['scalereward']
+        if agent.config['limitreward'] is not None:
+            limitreward = min(agent.config['limitreward'][1], max(agent.config['limitreward'][0], reward))
+        else:
+            limitreward = reward
+
+        if useConv == False:
+            obnew = obnew.reshape(-1, )
+
+        if len(ob.shape) == 3:
+            obnew1 = np.concatenate((ob1[obnew.shape[0]:, :, :], obnew), 0)
+        else:
+            obnew1 = np.concatenate((ob1[ob.shape[0]:], obnew))
+
+
+        agent.memory.add([ob1, a, limitreward, 1. - 1. * terminal_memory, t, None])
+        start_time3 = time.time()
+        if agent.config['threads'] == 0:
+            if learn and (not agent.config['policy']):
+                cost += agent.learn()
+            elif ((t + 1) % agent.config['batch_size'] == 0 or done) and agent.config['policy'] and agent.config[
+                'threads'] == 0:
+                # raise NotImplemented("startind not good for circular buffer")
+                agent.learnpolicy(0, agent.memory.sizemem())
+                agent.memoryLock.acquire()
+                agent.memory.empty()
+                agent.memoryLock.release()
+
+        ob1 = obnew1
+        ob = obnew
+        total_rew_discount += reward * (discount ** t)
+        total_rew += reward
+
+        if (t % 200 == 0 or done):
+            if agent.config['policy']:
+                print(agent.config['file'], 'episode', episode, t, done, 'V', agent.evalV(ob1, True), reward)
+            else:
+                print(agent.config['file'], 'episode', episode, t, done, 'Q',
+                      agent.evalQ(ob1.reshape(tuple([1] + list(ob1.shape)))), reward)
+        start_time4 = time.time()
+        if render and t % 1 == 0:  # render every X steps (X=1)
+            env.render()
+
+        if done: break
+        if t % 100 == 0:
+            agent.learnrate *= agent.config['decay_learnrate']
+        if t % 1 == 0 and episode<0 and False:#fixme
+            print("time step",time.time()-start_time, start_time2 - start_time,start_time3 - start_time2,
+                  start_time4-start_time3,time.time() - start_time4)
+    adjust_learning_rate(agent.optimizer, agent.learnrate)
+    return total_rew, t + 1, total_rew_discount
+
+
+def preprocess(observation, observation_space, scaled_obs, type='none'):
+    if type == 'crop':
+        resize_height = int(round(
+            float(observation.shape[0]) * scaled_obs[1] / observation.shape[1]))
+        observation = cv2.cvtColor(
+            cv2.resize(observation, (scaled_obs[1], resize_height), interpolation=cv2.INTER_LINEAR), cv2.COLOR_BGR2GRAY)
+        crop_y_cutoff = resize_height - 8 - scaled_obs[0]
+        cropped = observation[crop_y_cutoff:crop_y_cutoff + scaled_obs[0], :]
+        return cropped[None,...]#np.reshape(cropped, scaled_obs)
+    elif type == 'scale':
+        return cv2.cvtColor(cv2.resize(observation, (scaled_obs[1], scaled_obs[0]), interpolation=cv2.INTER_LINEAR),
+                            cv2.COLOR_BGR2GRAY)[None,...]
+    elif type == 'none' or np.isinf(observation_space.low).any() or np.isinf(observation_space.high).any():
+        return observation
+    elif type == 'flat':
+        o = (observation - observation_space.low) / (observation_space.high - observation_space.low) * 2. - 1.
+        return o.reshape(-1, )
+
+
+def adjust_learning_rate(optimizer, lr):
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
+
+
+class Memory(object):
+    def __init__(self, max_size=100000, copy=False, mem=[],start=-1,last=-1):
+        self.mem = mem
+        self.max_size = max_size
+        self.memoryLock = threading.Lock()
+        self.last_ind = last
+        self.start_ind = start
+        self.copy = copy
+
+    def empty(self):
+        self.mem = []
+        self.last_ind = -1
+        self.start_ind = -1
+
+    def __getitem__(self, item):  # item has to be from 0 to len(mem)-1
+        assert (item < len(self.mem))
+        idx = (self.start_ind + item) % self.max_size
+        if self.copy:
+            self.memoryLock.acquire()
+            val = self.mem[idx].deepcopy()
+            self.memoryLock.release()
+        else:
+            val = self.mem[idx]
+        return val
+
+    def add(self, example):
+        self.memoryLock.acquire()
+        self.last_ind += 1
+        self.last_ind = self.last_ind % self.max_size
+        if len(self.mem) >= self.max_size:
+            self.mem[self.last_ind] = example
+            self.start_ind = (self.last_ind + 1) % self.max_size  # circular buffer
+        else:
+            self.mem.append(example)
+            self.start_ind = 0
+        self.memoryLock.release()
+
+    def sizemem(self):
+        # self.memoryLock.acquire()
+        l = len(self.mem)
+        # self.memoryLock.release()
+        return l
+
+
+def vis(pl, w, image, images1, images2):
+    channels=1
+    pl.clf()
+    cols = max(w[0].shape[0], images2.shape[0])
+    for i in range(w[0].shape[0]):
+        pl.subplot(9, cols, 1 + i + cols * 6)
+        img = np.concatenate((w[0][i, :channels, :, :], w[0][i, channels:channels*2,:, :]),2)
+
+        img=img[0]#.reshape(img.shape[1],img.shape[2])
+        pl.imshow((img - img.min()) / (img.max() - img.min() + 1e-20), vmin=0, vmax=1, cmap=pl.get_cmap('gray'))
+        pl.axis('off')
+    if len(w)>1:
+        for i in range(w[1].shape[0]):
+            pl.subplot(9, cols, 1 + i + cols * 7)
+            img = np.concatenate((w[1][i, :channels, :, :], w[1][i, channels:channels*2,:, :]),2)
+            img = img[0]
+            pl.imshow((img - img.min()) / (img.max() - img.min() + 1e-20), vmin=0, vmax=1, cmap=pl.get_cmap('gray'))
+            pl.axis('off')
+
+    for i in range(images1.shape[0]):
+        pl.subplot(4, images1.shape[2] + 1, i + 1)
+        img = images1[i,:, :].reshape(-1, images1.shape[1])
+        # print img.shape,images2.shape
+        pl.imshow((img - img.min()) / (img.max() - img.min() + 1e-20), vmin=0, vmax=1, cmap=pl.get_cmap('gray'))
+        pl.axis('off')
+        #print('filtered 1', img.max(), img.min())
+    for i in range(images2.shape[0]):
+        #print(images1.shape[2] + 1, i + 2 + images1.shape[2])
+        pl.subplot(4, images1.shape[2] + 1, i + 2 + images1.shape[2])
+        img = images2[i, :, :].reshape(-1, images2.shape[1])
+        # print img.shape,images2.shape
+        pl.imshow((img - img.min()) / (img.max() - img.min() + 1e-20), vmin=0, vmax=1, cmap=pl.get_cmap('gray'))
+        pl.axis('off')
+        #print('filtered 2',img.max(), img.min())
+
+    pl.subplot(4, images1.shape[0] + 1, 1 + 1 + images1.shape[0] + images2.shape[0])
+    img = image[0, :, :]
+    #print('img',image.min(), image.max())
+    for aa in range(1, image.shape[0]):
+        img = np.concatenate((img, image[aa, :, :]),1)  # image.reshape(-1,image.shape[1],3)
+    pl.imshow((img - img.min()) / (img.max() - img.min() + 1e-20), vmin=0, vmax=1, cmap=pl.get_cmap('gray'))
+    pl.axis('off')

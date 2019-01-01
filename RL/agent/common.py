@@ -33,50 +33,6 @@ def rangeparameters(assigned):
         else:
             return "doubleQ", type(True), [True, False]
 
-'''
-"memsize": 10000,
-"randstart": 50,
-"scaleobs": 1.,
-"policy":True,
-"discounted_policy_grad": False,
-'doubleQ':False, # when policy=False
-"clip": 100.0,
-"cliptype": "deltaclip",
-"testeps": 0.,
-"actevery": 1,
-"copyQ": -1, # >=1 when policy=False
-"scalereward": 1.,
-"limitreward": None,
-"probupdate": 1.0,
-"lambda": 0., # 0.0 when policy=False
-"past": 0,
-"entropy":0.0,
-"eps": 0.6,  # Epsilon in epsilon greedy policies
-"mineps": 0.01,
-"decay": 0.997,  # Epsilon decay in epsilon greedy policies
-"initial_learnrate": 0.001,
-"decay_learnrate": 0.999,
-"decayoptimizer": 0.98,
-"epsoptimizer": 0.00001,
-"discount": 0.98,
-"batch_size": 32,
-"episodic": True,
-"hiddenlayers": [300],
-"regularization": [0.000000, 0.000000],
-"momentum": 0.,
-"file": "",
-"activation": 'elu', # tanh, sigmoid, relu, elu
-"conv":False,
-"fullgrad":False,
-"diffstate": False,
-"convbias":0.1,
-"scaling": 'none',
-"seed": -1,
-"threads": 0,
-"delay_threads": 0.0001,
-"initializer":'variance_scaling', # fixed, variance_scaling
-"shareallnet":True
-'''
 
 def checkparams(params):
     if params['policy']:

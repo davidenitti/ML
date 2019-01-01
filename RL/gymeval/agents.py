@@ -1,10 +1,9 @@
-from __future__ import print_function
-
 '''
 Created on Jun 26, 2016
 
 @author: Davide Nitti
 '''
+from __future__ import print_function
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -233,7 +232,6 @@ class deepQAgent(object):
                                 while nextstate != None and offset < limitd:
                                     offset += nextstate
                                     n = j + offset
-
                                     # print j,n
                                     alternativetarget += gamma * self.memory[n][2]
                                     gamma = gamma * self.config['discount']
