@@ -1,6 +1,14 @@
 def get_default(nameenv):
     if nameenv == 'CartPole-v0':
         params = {
+            "loss": "mse",
+            "optimizer": "adam",
+            "terminal_life":False,
+            "start_episode":0,
+            'transition_net': False,
+            "priority_memory": False,
+            "transition_weight": 0.01,
+            "normalize": False,
             "memsize": 20000, # number of past experience tuples to store for learning
             "randstart": 50,
             "scaleobs": 1,
@@ -13,36 +21,31 @@ def get_default(nameenv):
             "limitreward": None,
             "batch_norm": False,
             "probupdate": 1.0,
-            "lambda": .8, # 0.0 when policy=False
+            "lambda": .97, # 0.0 when policy=False
             "past": 0,
-            "entropy":0.01,
+            "entropy":0.001,
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.01,
             "decay": 0.995,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.003,
-            "decay_learnrate": 0.99999,
-            "decayoptimizer": 0.99,
-            "epsoptimizer": 0.000001,
-            "discount": 0.97,
+            "initial_learnrate": 0.0007,
+            "decay_learnrate": 0.9999,
+            "discount": 0.99,
             "batch_size": 256,
             "episodic": True,
             "hiddenlayers": [10],
             "sharedlayers":[60],
-            "regularization": [0.000000, 0.000000],
-            "momentum": 0.1,
+            "regularization": 0.0,
             "file": None,
             "activation": 'elu', # tanh, sigmoid, relu, elu
             "conv":False,
-            "diffstate": False,
-            "convbias":0.1,
             "scaling": 'none',
             "seed": -1,
-            "threads": 0,
-            "delay_threads": 0.0001,
+            "threads": 0
             }
     elif nameenv == 'Acrobot-v1':
         params = {
             'transition_net':False,
+            "priority_memory": False,
             "transition_weight":0.01,
             "normalize":True,
             "loss":"clipmse",
@@ -85,23 +88,24 @@ def get_default(nameenv):
     elif nameenv == 'LunarLander-v2':
         params = {
             'transition_net':False,
-            "normalize":True,
+            "normalize":False,
+            "priority_memory":True,
             "loss":"clipmse",
             "optimizer":"adam",
-            "initial_learnrate": 0.0004,
+            "initial_learnrate": 0.00025,
             "decay_learnrate": 1,
             "lambda": 0.,
             "eps": 0.6,  # Epsilon in epsilon greedy policies
             "mineps": 0.05,
             "testeps": 0.00,
-            "decay": 0.996,  # Epsilon decay in epsilon greedy policies
+            "decay": 0.9955,  # Epsilon decay in epsilon greedy policies
             "batch_norm" : False,
             "memsize": 100000,
             "randstart": 100,
             "policy":False,
             "discounted_policy_grad": False,
             'doubleQ':False,
-            "copyQ": 200,
+            "copyQ": -500,
             "scalereward": 1,
             "scaleobs": 1.,
             "limitreward": None,
@@ -114,7 +118,6 @@ def get_default(nameenv):
             "hiddenlayers": [],
             "sharedlayers": [256],
             "regularization": 0.000000,
-            "momentum": 0.,
             "file": None,
             "activation": 'leaky_relu',
             "conv":False,

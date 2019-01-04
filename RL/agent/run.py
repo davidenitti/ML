@@ -35,7 +35,7 @@ def getparams(episodes=1000000):
         params["file"] = args.file
     else:
         options={
-            'target':"LunarLander-v2",#LunarLander-v2 Breakout-v0
+            'target':"CartPole-v0",#LunarLander-v2 Breakout-v0
             'episodes':episodes,
             'render':True,
             'plot':True,
@@ -66,7 +66,7 @@ def main(numavg=100,params=None, sleep=0.0):
 
     reward_threshold = gym.envs.registry.spec(nameenv).reward_threshold
     env = gym.make(nameenv)
-
+    #print(env.unwrapped.get_action_meanings())
     resultsdir = "./data" + nameenv
 
     if params['monitor'] == True: # store performance and video (check https://gym.openai.com/docs )
@@ -87,7 +87,7 @@ def main(numavg=100,params=None, sleep=0.0):
         logger.debug("seed "+str(params["seed"]))
     try:
         agent = torchagent.deepQconv(logger, env.observation_space, env.action_space, env.reward_range,
-                                 **params)
+                                 params)
         num_steps = env.spec.timestep_limit
         avg = None
         plt.ion()
@@ -96,19 +96,23 @@ def main(numavg=100,params=None, sleep=0.0):
         greedyrewlist = [[],[]]
         totrewavglist = []
         total_rew_discountlist = []
-        testevery = 20
+        testevery = 25
         useConv=agent.config['conv']
+        max_total_rew_discount = float("-inf")
+        max_abs_rew_discount = float("-inf")
 
+        total_steps = 0
+        start_updates = agent.config['num_updates']
         print(agent.config)
         start_episode = agent.config['start_episode']
         agent.start_async_plot([(totrewlist,totrewavglist,greedyrewlist),reward_threshold], plt,params['plot'] == True,start_episode=start_episode)
 
         if agent.config['threads'] > 0:
-            agent.start_async_learning(num_threads=None,delay=agent.config['delay_threads'])
+            agent.start_async_learning(delay=0.000001)
 
         for episode in range(start_episode,params['episodes']):
 
-            if (episode) % testevery == 0 or episode >= params['episodes'] - numavg:
+            if (episode+1) % testevery == 0 or episode >= params['episodes'] - numavg:
                 is_test=True
             else:
                 is_test=False
@@ -123,9 +127,25 @@ def main(numavg=100,params=None, sleep=0.0):
                 learn = True
                 eps = episode
             startt = time.time()
-            total_rew, steps, total_rew_discount = agent_utils.do_rollout(agent, env, eps, num_steps=num_steps,
+            total_rew, steps, total_rew_discount,max_qval = agent_utils.do_rollout(agent, env, eps, num_steps=num_steps,
                             render=render,  useConv=useConv,
                             discount=agent.config["discount"], sleep=sleep, learn=learn)
+            max_total_rew_discount = max(max_total_rew_discount,total_rew_discount)
+            max_abs_rew_discount = max(max_abs_rew_discount, abs(total_rew_discount))
+            total_steps += steps
+            if agent.config['threads'] > 0:
+                if ((agent.config['num_updates']-start_updates)/total_steps)<agent.config['probupdate']:
+                    sleep+=0.0001
+                else:
+                    sleep=max(0.,sleep-0.0001)
+                print("sleep",sleep,"up",(agent.config['num_updates']-start_updates),"steps",total_steps,
+                      'ratio',((agent.config['num_updates']-start_updates)/total_steps))
+            if ((max_qval - max_total_rew_discount) / max_abs_rew_discount > 0.9):
+                agent.logger.warning("Q function too high: max rew disc  {:.3f}"
+                                     " max Q {:.3f} rel error {:.3f}".format(
+                                    max_total_rew_discount, max_qval,
+                                    (max_qval - max_total_rew_discount) / max_abs_rew_discount))
+
             if avg is None:
                 avg = total_rew
             if is_test:
@@ -148,11 +168,11 @@ def main(numavg=100,params=None, sleep=0.0):
 
                 total_rew_discountlist.append(total_rew_discount / agent.config['scalereward'])
             #print(avg,agent.config['scalereward'])
-            print("time {:.3f} steps {:6} total reward {:.3f} total reward disc {:.3f} avg {:.3f}, avg100 {:.3f}, eps {:.3f} " \
-                    "updates {:8} epoch {:.1f} lr {:.6f}".format((time.time() - startt) / steps * 100.,\
+            print("t {:.2f} steps {:6} reward {:.2f} reward disc {:.2f} avg {:.2f}, avg100 {:.2f}, eps {:.3f} " \
+                    "updates {:8} total steps {:8} epoch {:.1f} lr {:.5f}".format((time.time() - startt) / steps * 100.,\
                     steps, total_rew / agent.config['scalereward'],total_rew_discount / agent.config['scalereward'],
                     avg / agent.config['scalereward'],np.mean(np.array(totrewlist[-100:])),\
-                    agent.epsilon(eps), agent.config['num_updates'], agent.config['num_updates']/50000, agent.getlearnrate()))
+                    agent.epsilon(eps), agent.config['num_updates'],total_steps, agent.config['num_updates']/50000, agent.getlearnrate()))
         if params['monitor'] == True:
             env.monitor.close()
         print(agent.config)
