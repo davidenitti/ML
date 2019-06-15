@@ -1,3 +1,7 @@
+'''
+CNN autoencoder applied to faces (for example)
+Author: Davide Nitti
+'''
 import torch
 from torch import nn
 from torchvision import transforms, datasets
@@ -119,7 +123,7 @@ class Encoder(nn.Module):
         self.debug = False
 
     def decoding(self, encoding):
-        debug = self.debug  # and random.random() < 0.001
+        debug = self.debug
         x = self.upconv1(encoding)
         if debug:
             print(x.shape)
@@ -132,7 +136,7 @@ class Encoder(nn.Module):
         return x
 
     def forward(self, x):
-        debug = self.debug  # and random.random() < 0.001
+        debug = self.debug
 
         if debug:
             print(x.shape)
@@ -182,17 +186,15 @@ def train(args, model, device, train_loader, optimizer, epoch):
     image = None
     fig, ax = plt.subplots(7)
     for batch_idx, (data, target) in enumerate(train_loader):
-        time.sleep(0.25)  # fixme
+        time.sleep(0.01)  # fixme
         model.train()
         data, target = data.to(device), target.to(device)
         if image is None:
             image = data
-        # data = image #remove
         optimizer.zero_grad()
         with torch.autograd.detect_anomaly():
             encoding, output = model(data)
 
-            tmp = encoding.min(dim=0)
             stats_enc['min'] = torch.min(stats_enc['min'], encoding.min().cpu().detach())
             stats_enc['max'] = torch.max(stats_enc['max'], encoding.max().cpu().detach())
             for b in range(encoding.shape[0]):
@@ -205,13 +207,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
             stats_enc['var'] = (stats_enc['sum_var'] / stats_enc['n'])
             stats_enc['std'] = stats_enc['var'] ** 0.5
             loss_encoding = 0.001 * torch.mean(encoding ** 2) + 0.001 * torch.mean(encoding) ** 2
-            # square = (data - output) ** 2 + 0.1 * torch.abs(data - output)
-            # mask = 1.0*(square>(square.mean()+square.std()))
-            # mask = mask.float()
-            # mask_perc = mask.mean()*100
-            # loss1 = torch.mean(square*mask)
-            # loss2 = torch.mean(square*(1-mask))
-            # loss = 0.1*loss1 + 0.9*loss2
+
             loss_mse = torch.mean((data - output) ** 2)
             loss_aer = torch.mean(torch.abs(data - output))
             loss = 0.99 * loss_mse + 0.01 * loss_aer + loss_encoding
@@ -324,7 +320,8 @@ def main():
                         help='checkpoint')
     parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
-    parser.add_argument('--dataset', default='datasets', help='dataset path')
+    parser.add_argument('--dataset', default='datasets', help='dataset path '
+                        'e.g. https://drive.google.com/open?id=0BxYys69jI14kYVM3aVhKS1VhRUk')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -375,6 +372,7 @@ def main():
         train(args, model, device, train_loader, optimizer, epoch)
         scheduler.step()
 
+        # no test at the moment
         # test(args, model, device, test_loader)
 
         print('learning rate', get_lr(optimizer))
