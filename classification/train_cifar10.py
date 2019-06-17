@@ -5,9 +5,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 import json
-import os,sys,time
+import os, sys, time
+
 num_classes = 10
 import utils, networks
+
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
@@ -20,7 +22,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
-            if (args.checkpoint!=""):
+            if (args.checkpoint != ""):
                 utils.save_model(args.checkpoint, epoch, model, optimizer)
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -46,17 +48,17 @@ def test(args, model, device, test_loader):
         100. * correct / len(test_loader.dataset)))
     return correct / len(test_loader.dataset)
 
-def main(base_dir,args):
 
+def main(base_dir, args):
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
 
     device = torch.device("cuda" if use_cuda else "cpu")
     print('device', device)
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+    kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
     train_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(os.path.join(base_dir,'../data/cifar10'), train=True, download=True,
+        datasets.CIFAR10(os.path.join(base_dir, '../data/cifar10'), train=True, download=True,
                          transform=transforms.Compose([
                              transforms.RandomHorizontalFlip(),
                              transforms.ToTensor(),
@@ -64,7 +66,7 @@ def main(base_dir,args):
                          ])),
         batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(os.path.join(base_dir,'../data/cifar10'), train=False, transform=transforms.Compose([
+        datasets.CIFAR10(os.path.join(base_dir, '../data/cifar10'), train=False, transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])),
@@ -83,16 +85,17 @@ def main(base_dir,args):
         acc = test(args, model, device, test_loader)
         scheduler.step()
     if os.path.exists(args.results):
-        with open(args.results,'r') as f:
+        with open(args.results, 'r') as f:
             results = json.load(f)
     else:
-        results = {'res':[]}
-    results['res'].append([vars(args),acc])
+        results = {'res': []}
+    results['res'].append([vars(args), acc])
     with open(args.results, 'w') as f:
-        json.dump(results,f,indent=4)
+        json.dump(results, f, indent=4)
+
 
 if __name__ == '__main__':
-    base_dir="./"
+    base_dir = "./"
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10')
     parser.add_argument('--batch-size', type=int, default=60,
@@ -125,4 +128,4 @@ if __name__ == '__main__':
     parser.add_argument('--results', default=os.path.join(base_dir, 'results_cifar10.json'),
                         help='results')
     args = parser.parse_args([])
-    main(base_dir,args)
+    main(base_dir, args)
