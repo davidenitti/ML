@@ -183,14 +183,17 @@ def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     total_loss = 0.
     num_loss = 0
-    image = None
-    fig, ax = plt.subplots(7)
+    image_first_batch = None
+    fig, ax = plt.subplots(7, figsize=(20, 10))
+    num_baches = 0.0
+    total_time_batches = 0.0
     for batch_idx, (data, target) in enumerate(train_loader):
         time.sleep(0.01)  # fixme
+        start = time.time()
         model.train()
         data, target = data.to(device), target.to(device)
-        if image is None:
-            image = data
+        if image_first_batch is None:
+            image_first_batch = data
         optimizer.zero_grad()
         with torch.autograd.detect_anomaly():
             encoding, output = model(data)
@@ -216,9 +219,11 @@ def train(args, model, device, train_loader, optimizer, epoch):
             num_loss += 1
             loss.backward()
         optimizer.step()
+        time_batch = time.time() - start
+        total_time_batches += time_batch
+        num_baches += 1
         if batch_idx % args.log_interval == 0:
-            if batch_idx > 1 and batch_idx % args.log_interval * 5 == 0:
-                print('saving')
+            if batch_idx >= 1 and batch_idx % args.log_interval * 5 == 0:
                 if os.path.exists(args.checkpoint):
                     os.rename(args.checkpoint, args.checkpoint + '.old')
                 torch.save({
@@ -226,21 +231,31 @@ def train(args, model, device, train_loader, optimizer, epoch):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict()
                 }, args.checkpoint)
+                torch.save(model, args.checkpoint + "2")
                 print('saved')
 
             model.eval()
-            img1 = renorm(image[0])
+            img1 = renorm(image_first_batch[0])
+            mean_image_norm = renorm(mean_image)
+            if epoch == 1:
+                matplotlib.image.imsave(os.path.join(args.res_dir, 'mean_image.png'),
+                                        mean_image_norm.cpu().detach().numpy(), vmin=0.0, vmax=1.0)
             with torch.no_grad():
-                encod1, output1 = model(image)
-                img_rec1 = renorm(output1[0])
-                all_img = torch.cat((renorm(mean_image), img1.cpu(), img_rec1.cpu()), 1).detach().numpy()
+                encod1, output1 = model(image_first_batch)
+                img1_recon = renorm(output1[0])
+                all_img = torch.cat((img1.cpu(), img1_recon.cpu()), 1).detach().numpy()
+                matplotlib.image.imsave(os.path.join(args.res_dir, 'img1_reconstruction.png'), all_img, vmin=0.0,
+                                        vmax=1.0)
                 img2 = renorm(data[0])
                 img_rec2 = renorm(output[0])
                 all_img2 = torch.cat((img2, img_rec2), 1).cpu().detach().numpy()
+                matplotlib.image.imsave(os.path.join(args.res_dir, 'img2_reconstruction.png'), all_img2, vmin=0.0,
+                                        vmax=1.0)
 
-                rand_enc = 0. * torch.clamp(torch.randn_like(encod1[:1]) * stats_enc['std'].cuda(), -1, 1)  # fixme
-                rand_enc = torch.cat((rand_enc, encod1[:1]), 0)
-                rand_img = model.decoding(rand_enc)
+                zero_enc = torch.zeros_like(
+                    encod1[:1])  # * torch.clamp(torch.randn_like(encod1[:1]) * stats_enc['std'].cuda(), -1, 1)  # fixme
+                enc_to_show = torch.cat((zero_enc, encod1[:1]), 0)
+                rand_img = model.decoding(enc_to_show)
                 rand_img_list = []
                 width_img = rand_img.shape[2]
                 show_every = 3
@@ -249,6 +264,11 @@ def train(args, model, device, train_loader, optimizer, epoch):
                         rand_img_list.append(rand_img)
                     _, rand_img = model(rand_img)
                 rand_img = renorm_batch(torch.cat(rand_img_list, 3))
+                matplotlib.image.imsave(os.path.join(args.res_dir, 'zero_encode_evolution.png'),
+                                        rand_img[0, :, :width_img * 5].cpu().detach().numpy(), vmin=0.0, vmax=1.0)
+                matplotlib.image.imsave(os.path.join(args.res_dir, 'encode_evolution.png'),
+                                        rand_img[1, :, :width_img * 5].cpu().detach().numpy(),
+                                        vmin=0.0, vmax=1.0)
                 rand_img = torch.cat([r for r in rand_img], 0).cpu().detach().numpy()
                 img_list = []
                 for i in range(6):
@@ -260,6 +280,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
             plt.figure(1)
             ax[0].imshow(np.hstack((all_img, all_img2)))
             ax[1].imshow(all_img_blend)
+            matplotlib.image.imsave(os.path.join(args.res_dir, 'img1_to_img2_morph.png'), all_img_blend, vmin=0.0,
+                                    vmax=1.0)
 
             h = rand_img.shape[0]
             for row in range(2):
@@ -274,7 +296,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
             print('data {:.3f} {:.3f} {:.3f}'.format(data.min().item(), data.max().item(), data.mean().item()))
             print('output {:.3f} {:.3f} {:.3f}'.format(output.min().item(), output.max().item(), output.mean().item()))
-            # print(img_rec1.min().item(), img_rec1.max().item(), img_rec1.mean().item())
+            # print(img1_recon.min().item(), img1_recon.max().item(), img1_recon.mean().item())
             for s in stats_enc:
                 if isinstance(stats_enc[s], int):
                     print("{} = {}".format(s, stats_enc[s]))
@@ -282,10 +304,11 @@ def train(args, model, device, train_loader, optimizer, epoch):
                     print("{} = {:.3f} {:.3f} {:.3f}".format(
                         s, stats_enc[s].min().item(), stats_enc[s].mean().item(), stats_enc[s].max().item()))
             print('non_lin', model.non_lin)
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.4f} loss_mse: {:.4f}  loss_aer {:.4f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), (total_loss / num_loss),
-                loss_mse, loss_aer))
+            print(
+                'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.4f} loss_mse: {:.4f}  loss_aer {:.4f} time_batch {:.2f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                           100. * batch_idx / len(train_loader), (total_loss / num_loss),
+                    loss_mse, loss_aer, total_time_batches / num_baches))
             model.train()
     plt.close()
 
@@ -298,10 +321,10 @@ def get_lr(optimizer):
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch  Example')
-    parser.add_argument('--batch-size', type=int, default=24, metavar='N',
+    parser.add_argument('--batch-size', type=int, default=22, metavar='N',
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
+    # parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+    #                     help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=20, metavar='N',
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=0.0009, metavar='LR',
@@ -314,14 +337,15 @@ def main():
                         help='random seed (default: -1)')
     parser.add_argument('--optimizer', default='adam',
                         help='optimizer')
-    parser.add_argument('--log-interval', type=int, default=25, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                         help='how many batches to wait before logging training status')
     parser.add_argument('--checkpoint', default='tmp.pth',
                         help='checkpoint')
     parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
-    parser.add_argument('--dataset', default='datasets', help='dataset path '
-                        'e.g. https://drive.google.com/open?id=0BxYys69jI14kYVM3aVhKS1VhRUk')
+    parser.add_argument('--dataset', default='/home/davide/datasets/', help='dataset path '
+                                                                            'e.g. https://drive.google.com/open?id=0BxYys69jI14kYVM3aVhKS1VhRUk')
+    parser.add_argument('--res_dir', default='./', help='result dir')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -353,7 +377,7 @@ def main():
         norm = nn.InstanceNorm2d
     else:
         norm = nn.BatchNorm2d
-    print(norm)
+    print('using', norm)
     model = Encoder(non_lin=nn.ELU, norm=norm).to(device)
     if args.optimizer == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=args.lr, nesterov=True, momentum=0.8)
@@ -362,11 +386,15 @@ def main():
     else:
         raise NotImplementedError
     if os.path.exists(args.checkpoint):
-        checkpoint = torch.load(args.checkpoint)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.8)
+        try:
+            checkpoint = torch.load(args.checkpoint)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        except BaseException:
+            checkpoint = torch.load(args.checkpoint + '.old')
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
     print('learning rate', get_lr(optimizer))
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
