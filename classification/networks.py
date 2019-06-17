@@ -42,7 +42,6 @@ class Net(nn.Module):
         self.fc2 = nn.Linear(64, num_out)
 
         self.num_out = num_out
-        # self.emb = torch.empty(1,num_classes, num_out).uniform_(-1, 1)
 
     def forward(self, x):
         if self.net_params['random_pad']:
