@@ -9,14 +9,20 @@ import argparse
 import torch.optim as optim
 import matplotlib
 import time
-
-matplotlib.use("TkAgg")
+import json
+try:
+    matplotlib.use("TkAgg")
+except:
+    print('WARNING: TkAgg not loaded')
 import matplotlib.pyplot as plt
 import random, os
 import numpy as np
 
 STD = 0.505
-plt.ion()
+try:
+    import IPython.display
+except:
+    plt.ion()
 
 
 def mypause(interval):
@@ -54,18 +60,20 @@ class Interpolate(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, non_lin=nn.ELU, norm=nn.InstanceNorm2d):
+    def __init__(self, net_params):
         super(Encoder, self).__init__()
+        if net_params['instance_norm']:
+            self.norm = nn.InstanceNorm2d
+        else:
+            self.norm = nn.BatchNorm2d
+        self.base = net_params['base']
+        self.non_lin = getattr(nn, net_params['non_linearity'])
 
-        self.norm = norm
-        self.base = 72
-        self.non_lin = non_lin
-
-        self.base_enc = 48
-        self.upconv_chan = 256
-        self.upconv_size = 16
+        self.base_enc = net_params['num_features_encoding']
+        self.upconv_chan = net_params['upconv_chan']
+        self.upconv_size = net_params['upconv_size']
         self.conv1 = nn.Sequential(
-            *[nn.Conv2d(3, self.base, 5, 2, padding=2), self.norm(self.base, affine=True), non_lin()])
+            *[nn.Conv2d(3, self.base, 5, 2, padding=2), self.norm(self.base, affine=True), self.non_lin()])
 
         list_conv2 = []
 
@@ -73,14 +81,15 @@ class Encoder(nn.Module):
         for i in range(5):
             list_conv2 += [nn.Conv2d(chan, chan, 3, 1, padding=1),
                            self.norm(chan, affine=True),
-                           non_lin()]
+                           self.non_lin()]
 
             list_conv2 += [nn.Conv2d(chan, chan, 3, 1, padding=1),
                            self.norm(chan, affine=True),
-                           non_lin()]
-            list_conv2 += [nn.Conv2d(chan, chan, 3, 2, padding=1),
-                           self.norm(chan, affine=True),
-                           non_lin()]
+                           self.non_lin()]
+            list_conv2 += [nn.Conv2d(chan, chan*2, 3, 2, padding=1),
+                           self.norm(chan*2, affine=True),
+                           self.non_lin()]
+            chan = chan*2
         self.conv2 = nn.Sequential(*list_conv2)
 
         self.conv_enc = nn.Sequential(
@@ -91,26 +100,22 @@ class Encoder(nn.Module):
         self.upconv1 = nn.Sequential(*[
             View([-1]), nn.Linear(self.base_enc, self.upconv_chan * self.upconv_size * self.upconv_size),
             View([self.upconv_chan, self.upconv_size, self.upconv_size]),
-            non_lin(),
-            nn.Conv2d(self.upconv_chan, chan, 3, 1, padding=1),
-            self.norm(chan, affine=True),
-            non_lin()])
+            self.non_lin(),
+            nn.Conv2d(self.upconv_chan, self.upconv_chan, 3, 1, padding=1),
+            self.norm(self.upconv_chan, affine=True),
+            self.non_lin()])
         list_upconv2 = []
-        for i in range(4):
-            # if i>=4:
-            #     chan2 = chan//2
-            # else:
-            #     chan2 = chan
-            chan2 = chan
+        chan = self.upconv_chan
+        for i in range(5):
             list_upconv2 += [nn.Upsample(scale_factor=2, mode='nearest'),
-                             nn.Conv2d(chan, chan2, 3, 1, padding=1),
-                             self.norm(chan2, affine=True),
-                             non_lin()]
-            list_upconv2 += [nn.Conv2d(chan2, chan2, 3, 1, padding=1), self.norm(chan2, affine=True),
-                             non_lin()]
-            list_upconv2 += [nn.Conv2d(chan2, chan2, 3, 1, padding=1), self.norm(chan2, affine=True),
-                             non_lin()]
-            chan = chan2
+                             nn.Conv2d(chan, chan//2, 3, 1, padding=1),
+                             self.norm(chan//2, affine=True),
+                             self.non_lin()]
+            list_upconv2 += [nn.Conv2d(chan//2, chan//2, 3, 1, padding=1), self.norm(chan//2, affine=True),
+                             self.non_lin()]
+            list_upconv2 += [nn.Conv2d(chan//2, chan//2, 3, 1, padding=1), self.norm(chan//2, affine=True),
+                             self.non_lin()]
+            chan = chan//2
 
         self.upconv2 = nn.Sequential(*list_upconv2)
 
@@ -176,15 +181,29 @@ def var_loss(pred, gt):
     loss = torch.mean((var_pred - var_gt) ** 2)
     return loss
 
+def save_model(checkpoint,model,optimizer,save_raw,epoch):
+    if os.path.exists(checkpoint):
+        os.rename(checkpoint, checkpoint + '.old')
+    if not os.path.exists(os.path.dirname(checkpoint)):
+        os.makedirs(os.path.dirname(checkpoint))
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }, checkpoint)
+    if save_raw:
+        torch.save(model, checkpoint + "raw")
+    print('model saved')
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(args, model, device, train_loader, optimizer, epoch, callback=None):
     stats_enc = {'mean': 0, 'sum_var': 0, 'n': 0, 'min': torch.tensor(100000000.), 'max': torch.zeros(1)}
     mean_image = 0.0
     model.train()
     total_loss = 0.
     num_loss = 0
     image_first_batch = None
-    fig, ax = plt.subplots(7, figsize=(20, 10))
+    if args.local:
+        fig, ax = plt.subplots(7, figsize=(18, 10))
     num_baches = 0.0
     total_time_batches = 0.0
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -197,7 +216,6 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.zero_grad()
         with torch.autograd.detect_anomaly():
             encoding, output = model(data)
-
             stats_enc['min'] = torch.min(stats_enc['min'], encoding.min().cpu().detach())
             stats_enc['max'] = torch.max(stats_enc['max'], encoding.max().cpu().detach())
             for b in range(encoding.shape[0]):
@@ -223,17 +241,12 @@ def train(args, model, device, train_loader, optimizer, epoch):
         total_time_batches += time_batch
         num_baches += 1
         if batch_idx % args.log_interval == 0:
-            if batch_idx >= 1 and batch_idx % args.log_interval * 5 == 0:
-                if os.path.exists(args.checkpoint):
-                    os.rename(args.checkpoint, args.checkpoint + '.old')
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict()
-                }, args.checkpoint)
-                torch.save(model, args.checkpoint + "2")
-                print('saved')
-
+            if callback and batch_idx % args.log_interval == 2:
+                print('saving model')
+                save_model(args.checkpoint, model, optimizer, args.save_raw, epoch)
+                callback()
+            if not args.local:
+                fig, ax = plt.subplots(7, figsize=(18, 10))
             model.eval()
             img1 = renorm(image_first_batch[0])
             mean_image_norm = renorm(mean_image)
@@ -241,7 +254,11 @@ def train(args, model, device, train_loader, optimizer, epoch):
                 matplotlib.image.imsave(os.path.join(args.res_dir, 'mean_image.png'),
                                         mean_image_norm.cpu().detach().numpy(), vmin=0.0, vmax=1.0)
             with torch.no_grad():
+                if batch_idx==0:
+                    model.debug=True
                 encod1, output1 = model(image_first_batch)
+                if batch_idx==0:
+                    model.debug=False
                 img1_recon = renorm(output1[0])
                 all_img = torch.cat((img1.cpu(), img1_recon.cpu()), 1).detach().numpy()
                 matplotlib.image.imsave(os.path.join(args.res_dir, 'img1_reconstruction.png'), all_img, vmin=0.0,
@@ -292,7 +309,12 @@ def train(args, model, device, train_loader, optimizer, epoch):
             for a in ax:
                 a.axis('off')
             plt.subplots_adjust(wspace=0, hspace=0)
-            mypause(0.01)
+            if args.local:
+                mypause(0.01)
+            else:
+                #clear_output()
+                plt.draw()
+                plt.pause(0.01)
 
             print('data {:.3f} {:.3f} {:.3f}'.format(data.min().item(), data.max().item(), data.mean().item()))
             print('output {:.3f} {:.3f} {:.3f}'.format(output.min().item(), output.max().item(), output.mean().item()))
@@ -313,26 +335,25 @@ def train(args, model, device, train_loader, optimizer, epoch):
     plt.close()
 
 
+
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-
-def main():
-    # Training settings
+def get_args(args_list=None):
     parser = argparse.ArgumentParser(description='PyTorch  Example')
-    parser.add_argument('--batch-size', type=int, default=22, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=18, metavar='N',
                         help='input batch size for training (default: 64)')
     # parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
     #                     help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=20, metavar='N',
                         help='number of epochs to train (default: 10)')
-    parser.add_argument('--lr', type=float, default=0.0009, metavar='LR',
+    parser.add_argument('--lr', type=float, default=0.0007, metavar='LR',
                         help='learning rate (default: 0.01)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
-    parser.add_argument('--instance', action='store_true', default=False,
-                        help='instance norm')
+    parser.add_argument('--local', action='store_true', default=False,
+                        help='local')
     parser.add_argument('--seed', type=int, default=-1, metavar='S',
                         help='random seed (default: -1)')
     parser.add_argument('--optimizer', default='adam',
@@ -341,12 +362,30 @@ def main():
                         help='how many batches to wait before logging training status')
     parser.add_argument('--checkpoint', default='tmp.pth',
                         help='checkpoint')
-    parser.add_argument('--save-model', action='store_true', default=False,
-                        help='For Saving the current Model')
+    parser.add_argument('--save_raw', action='store_true', default=False,
+                        help='For Saving the current Model (raw)')
     parser.add_argument('--dataset', default='/home/davide/datasets/', help='dataset path '
                                                                             'e.g. https://drive.google.com/open?id=0BxYys69jI14kYVM3aVhKS1VhRUk')
     parser.add_argument('--res_dir', default='./', help='result dir')
-    args = parser.parse_args()
+    parser.add_argument('--net_params', default={'non_linearity': "PReLU",
+                                                 'instance_norm': False,
+                                                 'base': 128,
+                                                 'num_features_encoding': 32,
+                                                 'upconv_chan' : 256,
+                                                'upconv_size' : 16
+                                                 }, type=dict, help='net_params')
+    args = parser.parse_args(args_list)
+    return args
+
+def main(args,callback=None):
+    print(args)
+    if not os.path.exists(args.res_dir):
+        os.makedirs(args.res_dir)
+    with open(os.path.join(args.res_dir,'params.json'), 'w') as f:
+        json.dump(vars(args), f, indent=4)
+
+    if not os.path.exists(os.path.dirname(args.checkpoint)):
+        os.makedirs(os.path.dirname(args.checkpoint))
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     if args.seed >= 0:
@@ -373,12 +412,8 @@ def main():
     # test_loader = torch.utils.data.DataLoader(face_dataset_test,
     #     batch_size=args.test_batch_size, shuffle=True, **kwargs)
     # args.checkpoint = "cnn3.pth"
-    if args.instance:
-        norm = nn.InstanceNorm2d
-    else:
-        norm = nn.BatchNorm2d
-    print('using', norm)
-    model = Encoder(non_lin=nn.ELU, norm=norm).to(device)
+
+    model = Encoder(args.net_params).to(device)
     if args.optimizer == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=args.lr, nesterov=True, momentum=0.8)
     elif args.optimizer == 'adam':
@@ -390,16 +425,23 @@ def main():
             checkpoint = torch.load(args.checkpoint)
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        except BaseException:
-            checkpoint = torch.load(args.checkpoint + '.old')
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
+        except Exception as e:
+            print(e)
+            print(os.listdir(os.path.dirname(args.checkpoint)))
+            try:
+                checkpoint = torch.load(args.checkpoint + '.old')
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except Exception as e:
+                print(e)
+                print(os.listdir(os.path.dirname(args.checkpoint)))
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
     print('learning rate', get_lr(optimizer))
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
+        train(args, model, device, train_loader, optimizer, epoch, callback)
         scheduler.step()
-
+        if callback:
+            callback(True)
         # no test at the moment
         # test(args, model, device, test_loader)
 
@@ -407,4 +449,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    base_dir_res = "../../../results/cnn_autoencoders_local"
+    base_dir_dataset = '/home/davide/datasets/faces'
+    list_args = ['--local','--batch_size','8','--dataset', base_dir_dataset,
+                 '--res_dir', base_dir_res,
+                 '--checkpoint', os.path.join(base_dir_res,'checkpoint.pth')]
+    args = get_args(list_args)
+    main(args)
