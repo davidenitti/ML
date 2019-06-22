@@ -446,10 +446,11 @@ def main(args,callback=None):
     process_upload = None
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
-        save_model(args, model, optimizer, epoch)
-        scheduler.step()
         if process_upload is not None:
             process_upload.join()
+        save_model(args, model, optimizer, epoch)
+        scheduler.step()
+
         if callback is not None:
             process_upload = start_process(callback)
         # no test at the moment
