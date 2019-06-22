@@ -181,19 +181,35 @@ def var_loss(pred, gt):
     loss = torch.mean((var_pred - var_gt) ** 2)
     return loss
 
-def save_model(checkpoint,model,optimizer,save_raw,epoch):
-    if os.path.exists(checkpoint):
-        os.rename(checkpoint, checkpoint + '.old')
-    if not os.path.exists(os.path.dirname(checkpoint)):
-        os.makedirs(os.path.dirname(checkpoint))
+def save_model(args,model,optimizer,epoch):
+    if os.path.exists(args.checkpoint):
+        os.rename(args.checkpoint, args.checkpoint + '.old')
+    if not os.path.exists(os.path.dirname(args.checkpoint)):
+        os.makedirs(os.path.dirname(args.checkpoint))
     torch.save({
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()
-    }, checkpoint)
-    if save_raw:
-        torch.save(model, checkpoint + "raw")
+    }, args.checkpoint)
+    if args.save_raw:
+        torch.save(model, args.checkpoint + "raw")
     print('model saved')
+
+def load_model(args,model,optimizer):
+    try:
+        checkpoint = torch.load(args.checkpoint)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    except Exception as e:
+        print('error checkpoint', e)
+        print(os.listdir(os.path.dirname(args.checkpoint)))
+        try:
+            checkpoint = torch.load(args.checkpoint + '.old')
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        except Exception as e:
+            print('error checkpoint.old', e)
+            print(os.listdir(os.path.dirname(args.checkpoint)))
 
 def train(args, model, device, train_loader, optimizer, epoch, callback=None):
     stats_enc = {'mean': 0, 'sum_var': 0, 'n': 0, 'min': torch.tensor(100000000.), 'max': torch.zeros(1)}
@@ -241,10 +257,10 @@ def train(args, model, device, train_loader, optimizer, epoch, callback=None):
         total_time_batches += time_batch
         num_baches += 1
         if batch_idx % args.log_interval == 0:
-            if callback and batch_idx % args.log_interval == 2:
+            if callback is not None and batch_idx % args.log_interval*2 == 0:
                 print('saving model')
-                save_model(args.checkpoint, model, optimizer, args.save_raw, epoch)
-                callback()
+                save_model(args, model, optimizer,  epoch)
+                callback(False)
             if not args.local:
                 fig, ax = plt.subplots(7, figsize=(18, 10))
             model.eval()
@@ -421,26 +437,13 @@ def main(args,callback=None):
     else:
         raise NotImplementedError
     if os.path.exists(args.checkpoint):
-        try:
-            checkpoint = torch.load(args.checkpoint)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        except Exception as e:
-            print(e)
-            print(os.listdir(os.path.dirname(args.checkpoint)))
-            try:
-                checkpoint = torch.load(args.checkpoint + '.old')
-                model.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            except Exception as e:
-                print(e)
-                print(os.listdir(os.path.dirname(args.checkpoint)))
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
+        load_model(args.checkpoint,model,optimizer)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.995)
     print('learning rate', get_lr(optimizer))
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch, callback)
         scheduler.step()
-        if callback:
+        if callback is not None:
             callback(True)
         # no test at the moment
         # test(args, model, device, test_loader)
