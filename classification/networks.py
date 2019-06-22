@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from modules import ConvBlock
+
 
 class Net(nn.Module):
     def __init__(self, num_out=10, net_params=None):
@@ -8,7 +10,7 @@ class Net(nn.Module):
 
         self.net_params = net_params
         self.nonlin = getattr(nn, net_params['non_linearity'])
-
+        self.base = net_params['base']
         self.last_pool = getattr(F, net_params['last_pool'])
 
         if net_params['padding']:
@@ -16,55 +18,74 @@ class Net(nn.Module):
         else:
             self.padding = 0
 
-        self.conv1 = nn.Sequential(*[nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=self.padding),
-                                     nn.BatchNorm2d(64),
-                                     self.nonlin(),
-                                     nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding),
-                                     nn.BatchNorm2d(64),
-                                     self.nonlin()
-                                     ])
-        self.conv2 = nn.Sequential(*[nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding),
-                                     nn.BatchNorm2d(64),
-                                     self.nonlin(),
-                                     nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding),
-                                     nn.BatchNorm2d(64),
-                                     self.nonlin()
-                                     ])
-        self.conv3 = nn.Sequential(
-            *[nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding),
-              nn.BatchNorm2d(64),
-              self.nonlin(),
-              nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding),
-              nn.BatchNorm2d(64),
-              self.nonlin()
+        self.conv1 = nn.Sequential(*[
+            ConvBlock(in_channels=3, out_channels=self.base, kernel_size=3, stride=1, padding=self.padding,
+                      nonlin=self.nonlin),
+            ConvBlock(in_channels=self.base, out_channels=self.base, kernel_size=3, stride=1, padding=self.padding,
+                      nonlin=self.nonlin)
+            ])
+        self.conv2 = nn.Sequential(*[
+            ConvBlock(in_channels=self.base, out_channels=self.base * 2, kernel_size=3, stride=1, padding=self.padding,
+                      nonlin=self.nonlin),
+            ConvBlock(in_channels=self.base * 2, out_channels=self.base * 4, kernel_size=3, stride=1,
+                      padding=self.padding, nonlin=self.nonlin)
+            ])
+        self.conv3 = ConvBlock(in_channels=self.base * 4, out_channels=self.base * 8, kernel_size=3, stride=1,
+                               padding=self.padding, nonlin=self.nonlin)
+        self.conv4 = nn.Sequential(
+            *[ConvBlock(in_channels=self.base * 8, out_channels=self.base * 16, kernel_size=3, stride=1,
+                        padding=self.padding, nonlin=self.nonlin)
+              # ,
+              # ConvBlock(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding)
               ])
-        self.fc1 = nn.Sequential(*[nn.Linear(64, 64), nn.BatchNorm1d(64), self.nonlin()])
-        self.fc2 = nn.Linear(64, num_out)
 
         self.num_out = num_out
-
+        print('net v 1.1')
+        self.debug = False
     def forward(self, x):
+        if self.debug:
+            print(x.shape)
+
         if self.net_params['random_pad']:
-            #if self.training:
             x = torch.cat((torch.randn_like(x), x, torch.randn_like(x)), dim=2)
             x = torch.cat((torch.randn_like(x), x, torch.randn_like(x)), dim=3)
-            # else:
-            #     x = torch.cat((torch.zeros_like(x), x, torch.zeros_like(x)), dim=2)
-            #     x = torch.cat((torch.zeros_like(x), x, torch.zeros_like(x)), dim=3)
         x = self.conv1(x)
+
+        if self.debug:
+            print(x.shape)
+
         x = F.max_pool2d(x, 2, 2)
+
+        if self.debug:
+            print(x.shape)
+
         x = self.conv2(x)
+
+        if self.debug:
+            print(x.shape)
+
         x = F.max_pool2d(x, 2, 2)
+
+        if self.debug:
+            print(x.shape)
+
         x = self.conv3(x)
-        #print(x.shape)
+
+        if self.debug:
+            print(x.shape)
+
+        x = self.conv4(x)
+
+        if self.debug:
+            print(x.shape)
         if self.net_params['random_pad']:
             n_features = x.shape[3]
             x = x[:,:,n_features//4:-n_features//4,n_features//4:-n_features//4]
             #print(x.shape)
         x = self.last_pool(x, x.shape[1])
-        # print(x.shape)
+        if self.debug:
+            print(x.shape)
         x = x.view(x.shape[0], -1)
-        # print(x.shape)
-        x = self.fc1(x)
-        x = self.fc2(x)
+        if self.debug:
+            print(x.shape)
         return x
