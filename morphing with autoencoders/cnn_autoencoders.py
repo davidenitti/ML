@@ -280,13 +280,17 @@ def train(args, model, device, train_loader, optimizer, epoch):
                     model.debug=False
                 img1_recon = renorm(output1[0])
                 all_img = torch.cat((img1.cpu(), img1_recon.cpu()), 1).detach().numpy()
-                matplotlib.image.imsave(os.path.join(args.res_dir, 'img1_reconstruction.png'), all_img, vmin=0.0,
-                                        vmax=1.0)
+                matplotlib.image.imsave(
+                    os.path.join(args.res_dir, 'img1_reconstruction_epoch_{0:03d}.png'.format(epoch)), all_img,
+                    vmin=0.0,
+                    vmax=1.0)
                 img2 = renorm(data[0])
                 img_rec2 = renorm(output[0])
                 all_img2 = torch.cat((img2, img_rec2), 1).cpu().detach().numpy()
-                matplotlib.image.imsave(os.path.join(args.res_dir, 'img2_reconstruction.png'), all_img2, vmin=0.0,
-                                        vmax=1.0)
+                matplotlib.image.imsave(
+                    os.path.join(args.res_dir, 'img2_reconstruction_epoch_{0:03d}.png'.format(epoch)), all_img2,
+                    vmin=0.0,
+                    vmax=1.0)
 
                 zero_enc = torch.zeros_like(
                     encod1[:1])  # * torch.clamp(torch.randn_like(encod1[:1]) * stats_enc['std'].cuda(), -1, 1)  # fixme
@@ -300,9 +304,10 @@ def train(args, model, device, train_loader, optimizer, epoch):
                         rand_img_list.append(rand_img)
                     _, rand_img = model(rand_img)
                 rand_img = renorm_batch(torch.cat(rand_img_list, 3))
-                matplotlib.image.imsave(os.path.join(args.res_dir, 'zero_encode_evolution.png'),
+                matplotlib.image.imsave(
+                    os.path.join(args.res_dir, 'zero_encode_evolution_epoch_{0:03d}.png'.format(epoch)),
                                         rand_img[0, :, :width_img * 5].cpu().detach().numpy(), vmin=0.0, vmax=1.0)
-                matplotlib.image.imsave(os.path.join(args.res_dir, 'encode_evolution.png'),
+                matplotlib.image.imsave(os.path.join(args.res_dir, 'encode_evolution_epoch_{0:03d}.png'.format(epoch)),
                                         rand_img[1, :, :width_img * 5].cpu().detach().numpy(),
                                         vmin=0.0, vmax=1.0)
                 rand_img = torch.cat([r for r in rand_img], 0).cpu().detach().numpy()
@@ -316,7 +321,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
             plt.figure(1)
             ax[0].imshow(np.hstack((all_img, all_img2)))
             ax[1].imshow(all_img_blend)
-            matplotlib.image.imsave(os.path.join(args.res_dir, 'img1_to_img2_morph.png'), all_img_blend, vmin=0.0,
+            matplotlib.image.imsave(os.path.join(args.res_dir, 'img1_to_img2_morph_epoch_{0:03d}.png'.format(epoch)),
+                                    all_img_blend, vmin=0.0,
                                     vmax=1.0)
 
             h = rand_img.shape[0]
@@ -396,7 +402,8 @@ def get_args(args_list=None):
     args = parser.parse_args(args_list)
     return args
 
-def main(args,callback=None):
+
+def main(args, callback=None):
     print(args)
     if not os.path.exists(args.res_dir):
         os.makedirs(args.res_dir)
@@ -445,14 +452,15 @@ def main(args,callback=None):
     print('learning rate', get_lr(optimizer))
     process_upload = None
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
         if process_upload is not None:
             process_upload.join()
         save_model(args, model, optimizer, epoch)
         scheduler.step()
 
         if callback is not None:
-            process_upload = start_process(callback)
+            callback(False)
+            process_upload = start_process(callback, (True,))
+        train(args, model, device, train_loader, optimizer, epoch)
         # no test at the moment
         # test(args, model, device, test_loader)
 
