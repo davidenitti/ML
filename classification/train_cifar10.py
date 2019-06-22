@@ -83,7 +83,7 @@ def main(args):
     print(args.net_params)
     model = networks.Net(num_out, args.net_params).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
     utils.load_model(args.checkpoint, model, optimizer)
     best_acc = 0.0
     for epoch in range(1, args.epochs + 1):

@@ -23,13 +23,13 @@ class Net(nn.Module):
                       nonlin=self.nonlin),
             ConvBlock(in_channels=self.base, out_channels=self.base, kernel_size=3, stride=1, padding=self.padding,
                       nonlin=self.nonlin)
-            ])
+        ])
         self.conv2 = nn.Sequential(*[
             ConvBlock(in_channels=self.base, out_channels=self.base * 2, kernel_size=3, stride=1, padding=self.padding,
                       nonlin=self.nonlin),
             ConvBlock(in_channels=self.base * 2, out_channels=self.base * 4, kernel_size=3, stride=1,
                       padding=self.padding, nonlin=self.nonlin)
-            ])
+        ])
         self.conv3 = ConvBlock(in_channels=self.base * 4, out_channels=self.base * 8, kernel_size=3, stride=1,
                                padding=self.padding, nonlin=self.nonlin)
         self.conv4 = nn.Sequential(
@@ -38,10 +38,11 @@ class Net(nn.Module):
               # ,
               # ConvBlock(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=self.padding)
               ])
-
+        self.classify = nn.Linear(self.base * 16, num_out)
         self.num_out = num_out
         print('net v 1.1')
         self.debug = False
+
     def forward(self, x):
         if self.debug:
             print(x.shape)
@@ -80,12 +81,15 @@ class Net(nn.Module):
             print(x.shape)
         if self.net_params['random_pad']:
             n_features = x.shape[3]
-            x = x[:,:,n_features//4:-n_features//4,n_features//4:-n_features//4]
-            #print(x.shape)
+            x = x[:, :, n_features // 4:-n_features // 4, n_features // 4:-n_features // 4]
+            # print(x.shape)
         x = self.last_pool(x, x.shape[1])
         if self.debug:
             print(x.shape)
         x = x.view(x.shape[0], -1)
+        if self.debug:
+            print(x.shape)
+        x = self.classify(x)
         if self.debug:
             print(x.shape)
         return x
