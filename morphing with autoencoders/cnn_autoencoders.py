@@ -195,21 +195,21 @@ def save_model(args,model,optimizer,epoch):
         torch.save(model, args.checkpoint + "raw")
     print('model saved')
 
-def load_model(args,model,optimizer):
+def load_model(checkpoint_path,model,optimizer):
     try:
-        checkpoint = torch.load(args.checkpoint)
+        checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     except Exception as e:
         print('error checkpoint', e)
-        print(os.listdir(os.path.dirname(args.checkpoint)))
+        print(os.listdir(os.path.dirname(checkpoint_path)))
         try:
-            checkpoint = torch.load(args.checkpoint + '.old')
+            checkpoint = torch.load(checkpoint_path + '.old')
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         except Exception as e:
             print('error checkpoint.old', e)
-            print(os.listdir(os.path.dirname(args.checkpoint)))
+            print(os.listdir(os.path.dirname(checkpoint_path)))
 
 def train(args, model, device, train_loader, optimizer, epoch, callback=None):
     stats_enc = {'mean': 0, 'sum_var': 0, 'n': 0, 'min': torch.tensor(100000000.), 'max': torch.zeros(1)}
