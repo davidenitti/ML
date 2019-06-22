@@ -44,6 +44,7 @@ def test(args, model, device, test_loader):
             num += 1
             data, target = data.to(device), target.to(device)
             output = model(data)
+            assert output.shape[1] > target.max().item()
             test_loss += F.cross_entropy(output, target).item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
@@ -106,7 +107,7 @@ def main(args):
 
 def get_args(args_list):
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10')
-    parser.add_argument('--batch-size', type=int, default=50,
+    parser.add_argument('--batch-size', type=int, default=40,
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000,
                         help='input batch size for testing (default: 1000)')
@@ -146,7 +147,7 @@ def hyper_tune(args, update_func=None):
     # args = get_args(list_args)
     for non_lin in ['ReLU', "PReLU"]:
         for pool in ['avg_pool2d', 'max_pool2d']:
-            for base in [64, 128]:
+            for base in [64, 128, 256, 32]:
                 args.net_params = {'non_linearity': non_lin,
                                    'random_pad': False,
                                    'last_pool': pool,
