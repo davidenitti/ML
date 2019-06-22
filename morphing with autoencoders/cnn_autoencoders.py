@@ -17,7 +17,13 @@ except:
 import matplotlib.pyplot as plt
 import random, os
 import numpy as np
+from multiprocessing import Process
 
+
+def start_process(func, args):
+    p = Process(target=func, args=args)
+    p.start()
+    return p
 STD = 0.505
 try:
     import IPython.display
@@ -211,7 +217,8 @@ def load_model(checkpoint_path,model,optimizer):
             print('error checkpoint.old', e)
             print(os.listdir(os.path.dirname(checkpoint_path)))
 
-def train(args, model, device, train_loader, optimizer, epoch, callback=None):
+
+def train(args, model, device, train_loader, optimizer, epoch):
     stats_enc = {'mean': 0, 'sum_var': 0, 'n': 0, 'min': torch.tensor(100000000.), 'max': torch.zeros(1)}
     mean_image = 0.0
     model.train()
@@ -257,10 +264,6 @@ def train(args, model, device, train_loader, optimizer, epoch, callback=None):
         total_time_batches += time_batch
         num_baches += 1
         if batch_idx % args.log_interval == 0:
-            if callback is not None and batch_idx % args.log_interval*2 == 0:
-                print('saving model')
-                save_model(args, model, optimizer,  epoch)
-                callback(False)
             if not args.local:
                 fig, ax = plt.subplots(7, figsize=(18, 10))
             model.eval()
@@ -440,11 +443,15 @@ def main(args,callback=None):
         load_model(args.checkpoint,model,optimizer)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.995)
     print('learning rate', get_lr(optimizer))
+    process_upload = None
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch, callback)
+        train(args, model, device, train_loader, optimizer, epoch)
+        save_model(args, model, optimizer, epoch)
         scheduler.step()
+        if process_upload is not None:
+            process_upload.join()
         if callback is not None:
-            callback(True)
+            process_upload = start_process(callback)
         # no test at the moment
         # test(args, model, device, test_loader)
 
