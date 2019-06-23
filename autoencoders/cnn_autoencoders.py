@@ -113,7 +113,7 @@ class Encoder(nn.Module):
             self.non_lin()])
         list_upconv2 = []
         chan = self.upconv_chan
-        for i in range(5):
+        for i in range(net_params['upscale_blocks']):
             new_chan = int(chan // self.multiplier_chan)
             list_upconv2 += [nn.Upsample(scale_factor=2, mode='nearest'),
                              nn.Conv2d(chan, new_chan, 3, 1, padding=1),
@@ -204,6 +204,7 @@ def save_model(args,model,optimizer,epoch):
     print('model saved')
 
 def load_model(checkpoint_path,model,optimizer):
+    print('loading', checkpoint_path)
     try:
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -220,7 +221,7 @@ def load_model(checkpoint_path,model,optimizer):
             print(os.listdir(os.path.dirname(checkpoint_path)))
 
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
     stats_enc = {'mean': 0, 'sum_var': 0, 'n': 0, 'min': torch.tensor(100000000.), 'max': torch.zeros(1)}
     mean_image = 0.0
     model.train()
@@ -232,7 +233,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
     num_baches = 0.0
     total_time_batches = 0.0
     for batch_idx, (data, target) in enumerate(train_loader):
-        time.sleep(0.01)  # fixme
+        time.sleep(args.sleep)  # fixme
         start = time.time()
         model.train()
         data, target = data.to(device), target.to(device)
@@ -266,6 +267,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
         total_time_batches += time_batch
         num_baches += 1
         if batch_idx % args.log_interval == 0:
+            if save_checkpoint:
+                save_model(args, model, optimizer, epoch)
             if not args.local:
                 fig, ax = plt.subplots(7, figsize=(18, 10))
             model.eval()
@@ -385,7 +388,9 @@ def get_args(args_list=None):
                         help='random seed (default: -1)')
     parser.add_argument('--optimizer', default='adam',
                         help='optimizer')
-    parser.add_argument('--log-interval', type=int, default=50, metavar='N',
+    parser.add_argument('--sleep', type=float, default=0.01,
+                        help='sleep')
+    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
     parser.add_argument('--checkpoint', default='tmp.pth',
                         help='checkpoint')
@@ -397,16 +402,17 @@ def get_args(args_list=None):
     parser.add_argument('--net_params', default={'non_linearity': "PReLU",
                                                  'instance_norm': False,
                                                  'base': 128,
-                                                 'num_features_encoding': 32,
-                                                 'upconv_chan' : 256,
+                                                 'num_features_encoding': 128,
+                                                 'upconv_chan': 128,
                                                  'upconv_size': 16,
-                                                 'multiplier_chan': 2
+                                                 'multiplier_chan': 1.5,
+                                                 'upscale_blocks': 4
                                                  }, type=dict, help='net_params')
     args = parser.parse_args(args_list)
     return args
 
 
-def main(args, callback=None):
+def main(args, callback=None, upload_checkpoint=False):
     print(args)
     if not os.path.exists(args.res_dir):
         os.makedirs(args.res_dir)
@@ -455,8 +461,7 @@ def main(args, callback=None):
     print('learning rate', get_lr(optimizer))
     process_upload = None
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-
+        train(args, model, device, train_loader, optimizer, epoch, not upload_checkpoint)
         if process_upload is not None:
             process_upload.join()
         save_model(args, model, optimizer, epoch)
@@ -464,7 +469,8 @@ def main(args, callback=None):
 
         if callback is not None:
             callback(False)
-            process_upload = start_process(callback, (True,))
+            if upload_checkpoint:
+                process_upload = start_process(callback, (True,))
 
         # no test at the moment
         # test(args, model, device, test_loader)
@@ -473,9 +479,9 @@ def main(args, callback=None):
 
 
 if __name__ == '__main__':
-    base_dir_res = "../../../results/cnn_autoencoders_local"
+    base_dir_res = "/home/davide/results/cnn_autoencoders_local"
     base_dir_dataset = '/home/davide/datasets/faces'
-    list_args = ['--local','--batch_size','8','--dataset', base_dir_dataset,
+    list_args = ['--sleep', '0.5', '--local', '--batch_size', '18', '--dataset', base_dir_dataset,
                  '--res_dir', base_dir_res,
                  '--checkpoint', os.path.join(base_dir_res,'checkpoint.pth')]
     args = get_args(list_args)
