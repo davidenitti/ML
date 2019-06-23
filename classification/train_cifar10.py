@@ -8,7 +8,10 @@ import json
 import os, sys, time
 
 num_classes = 10
-import utils, networks
+if __name__ == '__main__':
+    import utils, networks
+else:
+    from . import utils, networks
 
 
 def train(args, model, device, train_loader, optimizer, epoch):

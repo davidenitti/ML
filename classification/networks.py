@@ -1,8 +1,11 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from modules import ConvBlock
 
+try:
+    from .modules import ConvBlock
+except:
+    from modules import ConvBlock
 
 class Net(nn.Module):
     def __init__(self, num_out=10, net_params=None):
