@@ -73,6 +73,7 @@ class Encoder(nn.Module):
         else:
             self.norm = nn.BatchNorm2d
         self.base = net_params['base']
+        self.multiplier_chan = net_params['multiplier_chan']
         self.non_lin = getattr(nn, net_params['non_linearity'])
 
         self.base_enc = net_params['num_features_encoding']
@@ -92,10 +93,10 @@ class Encoder(nn.Module):
             list_conv2 += [nn.Conv2d(chan, chan, 3, 1, padding=1),
                            self.norm(chan, affine=True),
                            self.non_lin()]
-            list_conv2 += [nn.Conv2d(chan, chan*2, 3, 2, padding=1),
-                           self.norm(chan*2, affine=True),
+            list_conv2 += [nn.Conv2d(chan, int(chan * self.multiplier_chan), 3, 2, padding=1),
+                           self.norm(int(chan * self.multiplier_chan), affine=True),
                            self.non_lin()]
-            chan = chan*2
+            chan = int(chan * self.multiplier_chan)
         self.conv2 = nn.Sequential(*list_conv2)
 
         self.conv_enc = nn.Sequential(
@@ -113,15 +114,16 @@ class Encoder(nn.Module):
         list_upconv2 = []
         chan = self.upconv_chan
         for i in range(5):
+            new_chan = int(chan // self.multiplier_chan)
             list_upconv2 += [nn.Upsample(scale_factor=2, mode='nearest'),
-                             nn.Conv2d(chan, chan//2, 3, 1, padding=1),
-                             self.norm(chan//2, affine=True),
+                             nn.Conv2d(chan, new_chan, 3, 1, padding=1),
+                             self.norm(new_chan, affine=True),
                              self.non_lin()]
-            list_upconv2 += [nn.Conv2d(chan//2, chan//2, 3, 1, padding=1), self.norm(chan//2, affine=True),
+            list_upconv2 += [nn.Conv2d(new_chan, new_chan, 3, 1, padding=1), self.norm(new_chan, affine=True),
                              self.non_lin()]
-            list_upconv2 += [nn.Conv2d(chan//2, chan//2, 3, 1, padding=1), self.norm(chan//2, affine=True),
+            list_upconv2 += [nn.Conv2d(new_chan, new_chan, 3, 1, padding=1), self.norm(new_chan, affine=True),
                              self.non_lin()]
-            chan = chan//2
+            chan = new_chan
 
         self.upconv2 = nn.Sequential(*list_upconv2)
 
@@ -254,7 +256,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
             loss_mse = torch.mean((data - output) ** 2)
             loss_aer = torch.mean(torch.abs(data - output))
-            loss = 0.99 * loss_mse + 0.01 * loss_aer + loss_encoding
+            loss = loss_mse + loss_encoding  # + 0.01 * loss_aer
 
             total_loss += loss.item()
             num_loss += 1
@@ -397,7 +399,8 @@ def get_args(args_list=None):
                                                  'base': 128,
                                                  'num_features_encoding': 32,
                                                  'upconv_chan' : 256,
-                                                'upconv_size' : 16
+                                                 'upconv_size': 16,
+                                                 'multiplier_chan': 2
                                                  }, type=dict, help='net_params')
     args = parser.parse_args(args_list)
     return args
@@ -452,6 +455,8 @@ def main(args, callback=None):
     print('learning rate', get_lr(optimizer))
     process_upload = None
     for epoch in range(1, args.epochs + 1):
+        train(args, model, device, train_loader, optimizer, epoch)
+
         if process_upload is not None:
             process_upload.join()
         save_model(args, model, optimizer, epoch)
@@ -460,7 +465,7 @@ def main(args, callback=None):
         if callback is not None:
             callback(False)
             process_upload = start_process(callback, (True,))
-        train(args, model, device, train_loader, optimizer, epoch)
+
         # no test at the moment
         # test(args, model, device, test_loader)
 
