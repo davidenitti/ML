@@ -3,6 +3,8 @@ import os
 def save_model(checkpoint,epoch,model,optimizer):
     if os.path.exists(checkpoint):
         os.rename(checkpoint, checkpoint + '.old')
+    if not os.path.exists(os.path.dirname(checkpoint)):
+        os.makedirs(os.path.dirname(checkpoint))
     torch.save({
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
