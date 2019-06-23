@@ -56,7 +56,7 @@ def test(args, model, device, test_loader):
     return correct / len(test_loader.dataset)
 
 
-def main(args):
+def main(args, callback=None, upload_checkpoint=False):
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
@@ -65,7 +65,7 @@ def main(args):
     print('device', device)
     kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
     train_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(os.path.join(args.base_dir_dataset, 'cifar10'), train=True, download=True,
+        datasets.CIFAR10(os.path.join(args.dataset, 'cifar10'), train=True, download=True,
                          transform=transforms.Compose([
                              transforms.RandomHorizontalFlip(),
                              transforms.ToTensor(),
@@ -73,7 +73,7 @@ def main(args):
                          ])),
         batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(os.path.join(args.base_dir_dataset, 'cifar10'), train=False, transform=transforms.Compose([
+        datasets.CIFAR10(os.path.join(args.dataset, 'cifar10'), train=False, transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])),
@@ -93,15 +93,17 @@ def main(args):
         acc = test(args, model, device, test_loader)
         best_acc = max(best_acc, acc)
         scheduler.step()
-    if os.path.exists(args.results):
-        with open(args.results, 'r') as f:
+
+    results_path = os.path.join(args.res_dir, 'results_cifar10.json')
+    if os.path.exists(results_path):
+        with open(results_path, 'r') as f:
             results = json.load(f)
     else:
         results = {'res': []}
     results['res'].append([vars(args), {'best': best_acc, 'last': acc}])
-    if not os.path.exists(os.path.dirname(args.results)):
-        os.makedirs(os.path.dirname(args.results))
-    with open(args.results, 'w') as f:
+    if not os.path.exists(os.path.dirname(results_path)):
+        os.makedirs(os.path.dirname(results_path))
+    with open(results_path, 'w') as f:
         json.dump(results, f, indent=4)
 
 
@@ -128,8 +130,8 @@ def get_args(args_list):
 
     parser.add_argument('--checkpoint', default="",
                         help='checkpoint path')
-    parser.add_argument('--base_dir_dataset', default='./dataset',
-                        help='base_dir_dataset path')
+    parser.add_argument('--dataset', default='./dataset',
+                        help='dataset path')
 
     parser.add_argument('--net_params', default={'non_linearity': "PReLU",
                                                  'random_pad': False,
@@ -137,13 +139,13 @@ def get_args(args_list):
                                                  'padding': True,
                                                  'base': 32
                                                  }, type=dict, help='net_params')
-    parser.add_argument('--results', default='./results_cifar10.json',
-                        help='results')
+    parser.add_argument('--res_dir', default='./',
+                        help='results directory')
     args = parser.parse_args(args_list)
     return args
 
 
-def hyper_tune(args, update_func=None):
+def hyper_tune(args, callback=None, upload_checkpoint=False):
     # args = get_args(list_args)
     for non_lin in ['ReLU', "PReLU"]:
         for pool in ['avg_pool2d', 'max_pool2d']:
@@ -155,14 +157,14 @@ def hyper_tune(args, update_func=None):
                                    'base': base
                                    }
                 main(args)
-                if update_func is not None:
-                    update_func()
+                if callback is not None:
+                    callback()
 
 
 if __name__ == '__main__':
     base_dir_res = "../../../results"
     base_dir_dataset = '/home/davide/datasets'
-    list_args = ['--base_dir_dataset', base_dir_dataset,
-                 '--results', os.path.join(base_dir_res, 'results_cifar10.json')]
+    list_args = ['--dataset', base_dir_dataset,
+                 '--res_dir', base_dir_res]
     args = get_args(list_args)
     main(args)
