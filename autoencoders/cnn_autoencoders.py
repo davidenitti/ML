@@ -10,6 +10,12 @@ import torch.optim as optim
 import matplotlib
 import time
 import json
+import torch.nn.functional as F
+import sys, os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from core.modules import View, CropPad, Identity, Interpolate, ConvBlock
+
 try:
     matplotlib.use("TkAgg")
 except:
@@ -24,6 +30,8 @@ def start_process(func, args):
     p = Process(target=func, args=args)
     p.start()
     return p
+
+
 STD = 0.505
 try:
     import IPython.display
@@ -43,31 +51,11 @@ def mypause(interval):
             return
 
 
-class View(nn.Module):
-    def __init__(self, shape):
-        super(View, self).__init__()
-        self.shape = shape
-
-    def forward(self, x):
-        shape = [x.shape[0]] + self.shape
-        return x.view(*shape)
-
-
-class Interpolate(nn.Module):
-    def __init__(self, size, mode):
-        super(Interpolate, self).__init__()
-        self.interp = nn.functional.interpolate
-        self.size = size
-        self.mode = mode
-
-    def forward(self, x):
-        x = self.interp(x, size=self.size, mode=self.mode, align_corners=False)
-        return x
-
-
 class Encoder(nn.Module):
-    def __init__(self, net_params):
+    def __init__(self, net_params, size_input):
         super(Encoder, self).__init__()
+        self.debug = False
+
         if net_params['instance_norm']:
             self.norm = nn.InstanceNorm2d
         else:
@@ -79,89 +67,113 @@ class Encoder(nn.Module):
         self.base_enc = net_params['num_features_encoding']
         self.upconv_chan = net_params['upconv_chan']
         self.upconv_size = net_params['upconv_size']
-        self.conv1 = nn.Sequential(
-            *[nn.Conv2d(3, self.base, 5, 2, padding=2), self.norm(self.base, affine=True), self.non_lin()])
+        max_hw = max(size_input[-2:])
+        if size_input[-1] != size_input[-2]:
+            self.pad_inp = CropPad(max_hw, max_hw)
+            self.crop_inp = CropPad(size_input[-2], size_input[-1])
+        else:
+            print('no pad/crop')
+            self.pad_inp = Identity()
+            self.crop_inp = Identity()
+
+        conv_block = ConvBlock
+        self.conv1 = conv_block(in_channels=3, out_channels=self.base, kernel_size=3, stride=1,
+                                padding=1, nonlin=self.non_lin, batch_norm=self.norm)
 
         list_conv2 = []
 
         chan = self.base
-        for i in range(5):
-            list_conv2 += [nn.Conv2d(chan, chan, 3, 1, padding=1),
-                           self.norm(chan, affine=True),
-                           self.non_lin()]
+        for i in range(6):
+            new_chan = min(net_params['max_chan'], int(chan * self.multiplier_chan))
+            list_conv2 += [conv_block(in_channels=chan, out_channels=chan, kernel_size=3, stride=1,
+                                      padding=1, nonlin=self.non_lin, batch_norm=self.norm)]
+            list_conv2 += [conv_block(in_channels=chan, out_channels=chan, kernel_size=3, stride=1,
+                                      padding=1, nonlin=self.non_lin, batch_norm=self.norm)]
+            list_conv2 += [conv_block(in_channels=chan, out_channels=new_chan, kernel_size=3, stride=2,
+                                      padding=1, nonlin=self.non_lin, batch_norm=self.norm)]
+            chan = new_chan
+        self.conv2 = nn.ModuleList(list_conv2)
 
-            list_conv2 += [nn.Conv2d(chan, chan, 3, 1, padding=1),
-                           self.norm(chan, affine=True),
-                           self.non_lin()]
-            list_conv2 += [nn.Conv2d(chan, int(chan * self.multiplier_chan), 3, 2, padding=1),
-                           self.norm(int(chan * self.multiplier_chan), affine=True),
-                           self.non_lin()]
-            chan = int(chan * self.multiplier_chan)
-        self.conv2 = nn.Sequential(*list_conv2)
+        pre_encoding_shape = self.encoding(torch.zeros(size_input)).shape
+        print('pre_encoding_shape', pre_encoding_shape)
 
         self.conv_enc = nn.Sequential(
-            *[nn.Conv2d(chan, self.base_enc, 4, 1, padding=0),
-              self.norm(self.base_enc, affine=True),
+            *[View([-1]),
+              nn.Linear(pre_encoding_shape[1] * pre_encoding_shape[2] * pre_encoding_shape[3], self.base_enc),
               nn.Tanh()])
 
-        self.upconv1 = nn.Sequential(*[
+        self.upconv1 = nn.ModuleList([
             View([-1]), nn.Linear(self.base_enc, self.upconv_chan * self.upconv_size * self.upconv_size),
             View([self.upconv_chan, self.upconv_size, self.upconv_size]),
             self.non_lin(),
-            nn.Conv2d(self.upconv_chan, self.upconv_chan, 3, 1, padding=1),
-            self.norm(self.upconv_chan, affine=True),
-            self.non_lin()])
+            conv_block(in_channels=self.upconv_chan, out_channels=self.upconv_chan, kernel_size=3, stride=1,
+                       padding=1, nonlin=self.non_lin, batch_norm=self.norm)])
         list_upconv2 = []
         chan = self.upconv_chan
+        new_chan = chan
         for i in range(net_params['upscale_blocks']):
-            new_chan = int(chan // self.multiplier_chan)
+            if i >= 2:
+                new_chan = int(chan // self.multiplier_chan)
             list_upconv2 += [nn.Upsample(scale_factor=2, mode='nearest'),
-                             nn.Conv2d(chan, new_chan, 3, 1, padding=1),
-                             self.norm(new_chan, affine=True),
-                             self.non_lin()]
-            list_upconv2 += [nn.Conv2d(new_chan, new_chan, 3, 1, padding=1), self.norm(new_chan, affine=True),
-                             self.non_lin()]
-            list_upconv2 += [nn.Conv2d(new_chan, new_chan, 3, 1, padding=1), self.norm(new_chan, affine=True),
-                             self.non_lin()]
+                             conv_block(in_channels=chan, out_channels=new_chan, kernel_size=3,
+                                        stride=1, padding=1, nonlin=self.non_lin, batch_norm=self.norm)]
+            list_upconv2 += [conv_block(in_channels=new_chan, out_channels=new_chan, kernel_size=3,
+                                        stride=1, padding=1, nonlin=self.non_lin, batch_norm=self.norm)]
+            list_upconv2 += [conv_block(in_channels=new_chan, out_channels=new_chan, kernel_size=3,
+                                        stride=1, padding=1, nonlin=self.non_lin, batch_norm=self.norm)]
             chan = new_chan
 
-        self.upconv2 = nn.Sequential(*list_upconv2)
+        self.upconv2 = nn.ModuleList(list_upconv2)
 
-        self.upconv_rec = nn.Sequential(*[
+        self.upconv_rec = nn.ModuleList([
             self.norm(chan, affine=True),
             nn.Conv2d(chan, 3, 3, 1, padding=1),
-            Interpolate((200, 200), mode='bilinear'),
+            Interpolate((max_hw, max_hw), mode='bilinear'),
             nn.Tanh()])
-
-        self.debug = False
 
     def decoding(self, encoding):
         debug = self.debug
-        x = self.upconv1(encoding)
-        if debug:
-            print(x.shape)
-        x = self.upconv2(x)
-        if debug:
-            print(x.shape)
-        x = self.upconv_rec(x)
+        x = encoding
+        for layer in self.upconv1:
+            x = layer(x)
+            if debug:
+                print(x.shape, layer)
+        for layer in self.upconv2:
+            x = layer(x)
+            if debug:
+                print(x.shape, layer)
+
+        for layer in self.upconv_rec:
+            x = layer(x)
+            if debug:
+                print(x.shape, layer)
+
+        x = self.crop_inp(x)
         if debug:
             print(x.shape)
         return x
 
-    def forward(self, x):
+    def encoding(self, x):
         debug = self.debug
-
         if debug:
-            print(x.shape)
+            print(x.shape, 'encoding start')
+        x = self.pad_inp(x)
+        if debug:
+            print(x.shape, 'pad_inp')
         x = self.conv1(x)
         if debug:
             print(x.shape)
-        x = self.conv2(x)
-        if debug:
-            print(x.shape)
+        for layer in self.conv2:
+            x = layer(x)
+            if debug:
+                print(x.shape, layer)
+        return x
+
+    def forward(self, x):
+        x = self.encoding(x)
         encoding = self.conv_enc(x)
 
-        if debug:
+        if self.debug:
             print('encoding', encoding.shape)
 
         x = self.decoding(encoding)
@@ -189,7 +201,8 @@ def var_loss(pred, gt):
     loss = torch.mean((var_pred - var_gt) ** 2)
     return loss
 
-def save_model(args,model,optimizer,epoch):
+
+def save_model(args, model, optimizer, epoch):
     if os.path.exists(args.checkpoint):
         os.rename(args.checkpoint, args.checkpoint + '.old')
     if not os.path.exists(os.path.dirname(args.checkpoint)):
@@ -203,7 +216,8 @@ def save_model(args,model,optimizer,epoch):
         torch.save(model, args.checkpoint + "raw")
     print('model saved')
 
-def load_model(checkpoint_path,model,optimizer):
+
+def load_model(checkpoint_path, model, optimizer):
     print('loading', checkpoint_path)
     try:
         checkpoint = torch.load(checkpoint_path)
@@ -229,7 +243,7 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
     num_loss = 0
     image_first_batch = None
     if args.local:
-        fig, ax = plt.subplots(7, figsize=(18, 10))
+        fig, ax = plt.subplots(9, figsize=(18, 10))
     num_baches = 0.0
     total_time_batches = 0.0
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -253,10 +267,12 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
                         encoding[b].cpu().detach() - stats_enc['mean'])
             stats_enc['var'] = (stats_enc['sum_var'] / stats_enc['n'])
             stats_enc['std'] = stats_enc['var'] ** 0.5
-            loss_encoding = 0.001 * torch.mean(encoding ** 2) + 0.001 * torch.mean(encoding) ** 2
-
+            loss_encoding = args.net_params['reg'] * torch.mean((0.04 - (encoding ** 2).mean(0)) ** 2) + \
+                            args.net_params['reg'] * torch.mean(encoding.mean(0) ** 2)
+            if 'dist_reg' in args.net_params:
+                pass  # loss_encoding -= args.net_params['dist_reg']*(encoding.view(encoding.shape[0],-1,1)-encoding.view(1,encoding.shape[0],-1))**2
             loss_mse = torch.mean((data - output) ** 2)
-            loss_aer = torch.mean(torch.abs(data - output))
+            # loss_aer = torch.mean(torch.abs(data - output))
             loss = loss_mse + loss_encoding  # + 0.01 * loss_aer
 
             total_loss += loss.item()
@@ -270,7 +286,7 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
             if save_checkpoint:
                 save_model(args, model, optimizer, epoch)
             if not args.local:
-                fig, ax = plt.subplots(7, figsize=(18, 10))
+                fig, ax = plt.subplots(9, figsize=(18, 10))
             model.eval()
             img1 = renorm(image_first_batch[0])
             mean_image_norm = renorm(mean_image)
@@ -278,11 +294,11 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
                 matplotlib.image.imsave(os.path.join(args.res_dir, 'mean_image.png'),
                                         mean_image_norm.cpu().detach().numpy(), vmin=0.0, vmax=1.0)
             with torch.no_grad():
-                if batch_idx==0:
-                    model.debug=True
+                if batch_idx == 0:
+                    model.debug = True
                 encod1, output1 = model(image_first_batch)
-                if batch_idx==0:
-                    model.debug=False
+                if batch_idx == 0:
+                    model.debug = False
                 img1_recon = renorm(output1[0])
                 all_img = torch.cat((img1.cpu(), img1_recon.cpu()), 1).detach().numpy()
                 matplotlib.image.imsave(
@@ -299,7 +315,9 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
 
                 zero_enc = torch.zeros_like(
                     encod1[:1])  # * torch.clamp(torch.randn_like(encod1[:1]) * stats_enc['std'].cuda(), -1, 1)  # fixme
-                enc_to_show = torch.cat((zero_enc, encod1[:1]), 0)
+                rand_enc = torch.clamp(
+                    torch.randn_like(encod1[:1]) * stats_enc['std'].cuda() + stats_enc['mean'].cuda(), -1, 1)
+                enc_to_show = torch.cat((zero_enc, rand_enc, encod1[:1]), 0)
                 rand_img = model.decoding(enc_to_show)
                 rand_img_list = []
                 width_img = rand_img.shape[2]
@@ -311,9 +329,12 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
                 rand_img = renorm_batch(torch.cat(rand_img_list, 3))
                 matplotlib.image.imsave(
                     os.path.join(args.res_dir, 'zero_encode_evolution_epoch_{0:03d}.png'.format(epoch)),
-                                        rand_img[0, :, :width_img * 5].cpu().detach().numpy(), vmin=0.0, vmax=1.0)
+                    rand_img[0, :, :width_img * 5].cpu().detach().numpy(), vmin=0.0, vmax=1.0)
+                matplotlib.image.imsave(
+                    os.path.join(args.res_dir, 'rand_encode_evolution_epoch_{0:03d}.png'.format(epoch)),
+                    rand_img[1, :, :width_img * 5].cpu().detach().numpy(), vmin=0.0, vmax=1.0)
                 matplotlib.image.imsave(os.path.join(args.res_dir, 'encode_evolution_epoch_{0:03d}.png'.format(epoch)),
-                                        rand_img[1, :, :width_img * 5].cpu().detach().numpy(),
+                                        rand_img[2, :, :width_img * 5].cpu().detach().numpy(),
                                         vmin=0.0, vmax=1.0)
                 rand_img = torch.cat([r for r in rand_img], 0).cpu().detach().numpy()
                 img_list = []
@@ -332,9 +353,11 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
 
             h = rand_img.shape[0]
             for row in range(2):
-                ax[row + 2].imshow(rand_img[:h // 2, row * width_img * 15:(row + 1) * width_img * 15])
+                ax[row + 2].imshow(rand_img[:h // 3, row * width_img * 15:(row + 1) * width_img * 15])
             for row in range(2):
-                ax[row + 2 + 2].imshow(rand_img[h // 2:, row * width_img * 15:(row + 1) * width_img * 15])
+                ax[row + 2 + 2].imshow(rand_img[h // 3:2 * h // 3, row * width_img * 15:(row + 1) * width_img * 15])
+            for row in range(2):
+                ax[row + 2 + 2 + 2].imshow(rand_img[2 * h // 3:, row * width_img * 15:(row + 1) * width_img * 15])
             plt.tight_layout()
             for a in ax:
                 a.axis('off')
@@ -342,43 +365,45 @@ def train(args, model, device, train_loader, optimizer, epoch, save_checkpoint):
             if args.local:
                 mypause(0.01)
             else:
-                #clear_output()
+                # clear_output()
                 plt.draw()
                 plt.pause(0.01)
 
             print('data {:.3f} {:.3f} {:.3f}'.format(data.min().item(), data.max().item(), data.mean().item()))
             print('output {:.3f} {:.3f} {:.3f}'.format(output.min().item(), output.max().item(), output.mean().item()))
             # print(img1_recon.min().item(), img1_recon.max().item(), img1_recon.mean().item())
+            print('stats_enc')
             for s in stats_enc:
                 if isinstance(stats_enc[s], int):
                     print("{} = {}".format(s, stats_enc[s]))
                 else:
-                    print("{} = {:.3f} {:.3f} {:.3f}".format(
-                        s, stats_enc[s].min().item(), stats_enc[s].mean().item(), stats_enc[s].max().item()))
+                    print("{} = {:.3f} {:.3f} {:.3f} shape {}".format(
+                        s, stats_enc[s].min().item(), stats_enc[s].mean().item(), stats_enc[s].max().item(),
+                        stats_enc[s].shape))
             print('non_lin', model.non_lin)
             print(
-                'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.4f} loss_mse: {:.4f}  loss_aer {:.4f} time_batch {:.2f}'.format(
+                'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.4f} loss_mse: {:.4f}  loss_enc {:.4f} time_batch {:.2f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                            100. * batch_idx / len(train_loader), (total_loss / num_loss),
-                    loss_mse, loss_aer, total_time_batches / num_baches))
+                    loss_mse, loss_encoding.item(), total_time_batches / num_baches))
             model.train()
     plt.close()
-
 
 
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
+
 def get_args(args_list=None):
     parser = argparse.ArgumentParser(description='PyTorch  Example')
-    parser.add_argument('--batch_size', type=int, default=18, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=32, metavar='N',
                         help='input batch size for training (default: 64)')
     # parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
     #                     help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=20, metavar='N',
-                        help='number of epochs to train (default: 10)')
-    parser.add_argument('--lr', type=float, default=0.0007, metavar='LR',
+    parser.add_argument('--epochs', type=int, default=50, metavar='N',
+                        help='number of epochs to train (default: 50)')
+    parser.add_argument('--lr', type=float, default=0.0008, metavar='LR',
                         help='learning rate (default: 0.01)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
@@ -388,7 +413,7 @@ def get_args(args_list=None):
                         help='random seed (default: -1)')
     parser.add_argument('--optimizer', default='adam',
                         help='optimizer')
-    parser.add_argument('--sleep', type=float, default=0.01,
+    parser.add_argument('--sleep', type=float, default=0.001,
                         help='sleep')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
@@ -401,12 +426,15 @@ def get_args(args_list=None):
     parser.add_argument('--res_dir', default='./', help='result dir')
     parser.add_argument('--net_params', default={'non_linearity': "PReLU",
                                                  'instance_norm': False,
-                                                 'base': 128,
-                                                 'num_features_encoding': 128,
-                                                 'upconv_chan': 128,
-                                                 'upconv_size': 16,
-                                                 'multiplier_chan': 1.5,
-                                                 'upscale_blocks': 4
+                                                 'base': 32,
+                                                 'num_features_encoding': 256,
+                                                 'upconv_chan': 256,
+                                                 'upconv_size': 4,
+                                                 'multiplier_chan': 2,
+                                                 'max_chan': 512,
+                                                 'upscale_blocks': 6,
+                                                 'reg': 0.2,
+                                                 'dist_reg': 0.1
                                                  }, type=dict, help='net_params')
     args = parser.parse_args(args_list)
     return args
@@ -416,7 +444,7 @@ def main(args, callback=None, upload_checkpoint=False):
     print(args)
     if not os.path.exists(args.res_dir):
         os.makedirs(args.res_dir)
-    with open(os.path.join(args.res_dir,'params.json'), 'w') as f:
+    with open(os.path.join(args.res_dir, 'params.json'), 'w') as f:
         json.dump(vars(args), f, indent=4)
 
     if not os.path.exists(os.path.dirname(args.checkpoint)):
@@ -448,7 +476,7 @@ def main(args, callback=None, upload_checkpoint=False):
     #     batch_size=args.test_batch_size, shuffle=True, **kwargs)
     # args.checkpoint = "cnn3.pth"
 
-    model = Encoder(args.net_params).to(device)
+    model = Encoder(args.net_params, next(iter(train_loader))[0].shape).to(device)
     if args.optimizer == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=args.lr, nesterov=True, momentum=0.8)
     elif args.optimizer == 'adam':
@@ -456,7 +484,7 @@ def main(args, callback=None, upload_checkpoint=False):
     else:
         raise NotImplementedError
     if os.path.exists(args.checkpoint):
-        load_model(args.checkpoint,model,optimizer)
+        load_model(args.checkpoint, model, optimizer)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.995)
     print('learning rate', get_lr(optimizer))
     process_upload = None
@@ -483,6 +511,6 @@ if __name__ == '__main__':
     base_dir_dataset = '/home/davide/datasets/faces'
     list_args = ['--sleep', '0.5', '--local', '--batch_size', '18', '--dataset', base_dir_dataset,
                  '--res_dir', base_dir_res,
-                 '--checkpoint', os.path.join(base_dir_res,'checkpoint.pth')]
+                 '--checkpoint', os.path.join(base_dir_res, 'checkpoint.pth')]
     args = get_args(list_args)
     main(args)
