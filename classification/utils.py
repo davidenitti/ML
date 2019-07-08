@@ -10,7 +10,7 @@ def save_model(checkpoint,epoch,model,optimizer):
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()
     }, checkpoint)
-    torch.save(model, checkpoint + "raw")
+    # torch.save(model, checkpoint + "raw")
     print('saved')
 
 def load_model(checkpoint,model,optimizer):
