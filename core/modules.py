@@ -4,43 +4,56 @@ import torch.nn.functional as F
 import random
 
 
-class StaticBatchNorm2d(nn.Module):
-    def __init__(self, chan):
-        super(StaticBatchNorm2d, self).__init__()
-        self.chan = chan
-        self.mean = nn.Parameter(torch.zeros((1, chan, 1, 1), requires_grad=False), requires_grad=False)
-        self.var = nn.Parameter(torch.ones((1, chan, 1, 1), requires_grad=False), requires_grad=False)
-        self.eps = 0.00001
+class PixelNorm2d(nn.Module):
+    """
+    similar to local responce normalization.
+    taken from
+    Progressive Growing of GANs for Improved Quality, Stability, and Variation
+    """
+
+    def __init__(self, chan, affine=True):
+        super(PixelNorm2d, self).__init__()
+        self.eps = 0.0000001
         self.gain = nn.Parameter(torch.ones((1, chan, 1, 1)))
         self.bias = nn.Parameter(torch.zeros((1, chan, 1, 1)))
-        self.decay = 0.995
-        self.start = True
-        print('decay', self.decay)
 
     def forward(self, input):
-        if self.training:
-            decay = self.decay
-            self.mean *= decay
-            self.mean += (1 - decay) * input.mean(0, keepdim=True).mean(-1, keepdim=True).mean(-2,
-                                                                                               keepdim=True).detach()
-            self.var *= decay
-            self.var += (1 - decay) * torch.var(input, dim=(0, 2, 3), keepdim=True).detach()
-
-        out = (input - self.mean) / (self.var.sqrt() + self.eps) * self.gain + self.bias
-
-        if False and random.random() < 0.001:
-            print('gain bias', self.gain[0, 0, 0, 0], self.bias[0, 0, 0, 0])
-            print('mean std', self.mean[0, 0, 0, 0], self.var.sqrt()[0, 0, 0, 0])
+        out = input / (torch.mean(input ** 2, dim=1, keepdim=True) + self.eps).sqrt()
+        out = out * self.gain + self.bias
         return out
 
 
-class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, nonlin, batch_norm):
-        super(ConvBlock, self).__init__()
+class Noise(nn.Module):
+    def __init__(self, noise_std):
+        super(Noise, self).__init__()
+        self.noise_std = noise_std
+
+    def forward(self, x):
+        if self.noise_std > 0 and self.training:
+            return x + torch.randn_like(x, requires_grad=False, device=x.device) * self.noise_std
+        else:
+            return x
+
+
+class TanhMod(nn.Module):
+    def __init__(self, scale):
+        super(TanhMod, self).__init__()
+        self.scale = scale
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        return self.tanh(x / self.scale) * self.scale
+
+
+class ConvBlock2(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, nonlin, batch_norm,
+                 noise_std=0.0, affine=True):
+        super(ConvBlock2, self).__init__()
         self.conv1 = nn.Sequential(
             *[nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride,
                         padding=padding),
-              batch_norm(out_channels),
+              batch_norm(out_channels, affine=affine),
+              Noise(noise_std),
               nonlin()
               ])
 
@@ -48,8 +61,26 @@ class ConvBlock(nn.Module):
         return self.conv1(x)
 
 
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, nonlin, batch_norm,
+                 noise_std=0.0, affine=True):
+        super(ConvBlock, self).__init__()
+        self.conv1 = nn.Sequential(
+            *[nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride,
+                        padding=padding),
+              batch_norm(out_channels, affine=affine),
+              nonlin()
+              ])
+        self.noise_std = noise_std
+
+    def forward(self, x):
+        if self.noise_std > 0 and self.training:
+            x = x + torch.randn_like(x, requires_grad=False, device=x.device) * self.noise_std
+        return self.conv1(x)
+
+
 class Identity(nn.Module):
-    def __init__(self):
+    def __init__(self, dummy=None):
         super(Identity, self).__init__()
 
     def forward(self, x):
@@ -96,7 +127,8 @@ class CropPad(nn.Module):
 class ResNetBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=1, nonlin=None, batch_norm=None):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=1, nonlin=None, batch_norm=None,
+                 noise_std=0.0, affine=True):
         if batch_norm is None:
             batch_norm = nn.BatchNorm2d
         if nonlin is None:
@@ -104,21 +136,22 @@ class ResNetBlock(nn.Module):
         super(ResNetBlock, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding,
                                bias=False)
-        self.bn1 = batch_norm(out_channels)
+        self.bn1 = batch_norm(out_channels, affine=affine)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, stride=1, padding=padding,
                                bias=False)
-        self.bn2 = batch_norm(out_channels)
+        self.bn2 = batch_norm(out_channels, affine=affine)
         self.nonlin = nonlin()
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != self.expansion * out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(in_channels, self.expansion * out_channels, kernel_size=1, stride=stride, bias=False),
-                batch_norm(self.expansion * out_channels)
+                batch_norm(self.expansion * out_channels, affine=affine)
             )
+        self.noise = Noise(noise_std)
 
     def forward(self, x):
-        out = self.nonlin(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
+        out = self.nonlin(self.noise(self.bn1(self.conv1(x))))
+        out = self.noise(self.bn2(self.conv2(out)))
         out += self.shortcut(x)
         out = self.nonlin(out)
         return out
