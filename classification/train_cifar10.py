@@ -1,3 +1,6 @@
+"""
+WARNING this is beta code!
+"""
 from __future__ import print_function
 import argparse
 import torch
@@ -7,14 +10,17 @@ from torchvision import datasets, transforms
 import json
 import os, sys, time
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from core import utils
+
 num_classes = 10
 if __name__ == '__main__':
-    import utils, networks
+    import networks
 else:
-    from . import utils, networks
+    from . import networks
 
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(args, model, device, train_loader, optimizer, epoch, scheduler):
     if epoch == 1:
         model.debug = True
     model.train()
@@ -40,7 +46,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.step()
         if batch_idx % args.log_interval == 0 or batch_idx == len(train_loader) - 1:
             if (args.checkpoint != ""):
-                utils.save_model(args.checkpoint, epoch, model, optimizer)
+                utils.save_model(args.checkpoint, epoch, model, optimizer, scheduler)
             print('Train Epoch: {} [{}/{} ({:.1f}%)]\tLoss: {:.6f}'.format(
                 epoch,
                 min(len(train_loader.dataset), (batch_idx + 1) * train_loader.batch_size),
@@ -103,21 +109,17 @@ def main(args, callback=None, upload_checkpoint=False):
     print(args.net_params)
     model = networks.Net(num_out, args.net_params, next(iter(train_loader))[0].shape).to(device)
     if args.optimizer.lower() == "adam":
-        if args.lr is None:
-            args.lr = 0.001
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer.lower() == "sgd":
-        if args.lr is None:
-            args.lr = 0.1
         optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     else:
         raise NotImplementedError
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
-    utils.load_model(args.checkpoint, model, optimizer)
+    utils.load_model(args.checkpoint, model, optimizer, scheduler)
     best_acc = 0.0
     for epoch in range(1, args.epochs + 1):
         print('learning rate {:.5f}'.format(utils.get_lr(optimizer)))
-        train(args, model, device, train_loader, optimizer, epoch)
+        train(args, model, device, train_loader, optimizer, epoch, scheduler)
         acc = test(args, model, device, test_loader)
         best_acc = max(best_acc, acc)
         scheduler.step()
@@ -137,7 +139,7 @@ def main(args, callback=None, upload_checkpoint=False):
 
 def get_args(args_list):
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10')
-    parser.add_argument('--batch-size', type=int, default=64,
+    parser.add_argument('--batch-size', type=int, default=128,
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000,
                         help='input batch size for testing (default: 1000)')
@@ -147,7 +149,7 @@ def get_args(args_list):
                         help='learning rate')
     parser.add_argument('--sleep', type=float, default=0.01,
                         help='sleep')
-    parser.add_argument('--weight_decay', type=float, default=2e-6,
+    parser.add_argument('--weight_decay', type=float, default=1e-6,
                         help='learning rate (default: 0.01)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
@@ -155,7 +157,7 @@ def get_args(args_list):
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=500,
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--optimizer', default="sgd",
+    parser.add_argument('--optimizer', default="adam",
                         help='sleep')
     parser.add_argument('--checkpoint', default="",
                         help='checkpoint path')
@@ -168,40 +170,57 @@ def get_args(args_list):
                                                  'padding': True,
                                                  'base': 32,
                                                  'autoencoder': False,
-                                                 'batchnorm': 'standard',
+                                                 'batchnorm': 'BatchNorm2d',
                                                  'conv_block': 'ResNetBlock',
-                                                 'kernel_size': 3
+                                                 'kernel_size': 3,
+                                                 'noise': 0.0
                                                  }, type=dict, help='net_params')
     parser.add_argument('--res_dir', default='./',
                         help='results directory')
     args = parser.parse_args(args_list)
+
+    if args.optimizer.lower() == "adam" and args.lr is None:
+        args.lr = 0.001
+    elif args.optimizer.lower() == "sgd" and args.lr is None:
+        args.lr = 0.09
     return args
 
 
 def hyper_tune(args, callback=None, upload_checkpoint=False):
     # args = get_args(list_args)
     for autoencoder in [False, True]:
-        for non_lin in ['ReLU', 'ReLU6', "PReLU"]:
-            for pool in ['avg_pool2d', 'max_pool2d']:
-                for base in [64, 128]:
+        for pool in ['avg_pool2d', 'max_pool2d']:
+            for noise in [0.0, 0.02, 0.04]:
+                for base in [64]:
                     for conv_block in ['ResNetBlock']:
-                        for kernel in [3, 5]:
-                            for opt in ['adam']:
-                                args.optimizer = opt
+                        for non_lin in ['TanhScaled', 'LeakyReLU', 'ReLU', "PReLU", 'ReLU6']:
+                            for batchnorm in ['BatchNorm2d']:
+
                                 args.net_params = {'non_linearity': non_lin,
                                                    'random_pad': False,
                                                    'last_pool': pool,
                                                    'padding': True,
                                                    'base': base,
                                                    'autoencoder': autoencoder,
-                                                   'batchnorm': 'standard',
+                                                   'batchnorm': batchnorm,
                                                    'conv_block': conv_block,
-                                                   'kernel_size': kernel
+                                                   'kernel_size': 3,
+                                                   'noise': noise
                                                    }
                                 args.checkpoint = ""  # checkpoint not needed
-                                main(args)
-                                if callback is not None:
-                                    callback()
+                                results_path = os.path.join(args.res_dir, 'results_cifar10.json')
+                                already_done = False
+                                if os.path.exists(results_path):
+                                    with open(results_path, 'r') as f:
+                                        results = json.load(f)
+                                    for r in results['res']:
+                                        if r[0] == vars(args):
+                                            already_done = True
+                                            print('already done skip', args)
+                                if not already_done:
+                                    main(args)
+                                    if callback is not None:
+                                        callback()
 
 
 if __name__ == '__main__':
@@ -211,4 +230,4 @@ if __name__ == '__main__':
                  '--res_dir', base_dir_res,
                  '--sleep', '0.1']
     args = get_args(list_args)
-    main(args)
+    hyper_tune(args)

@@ -1,3 +1,6 @@
+"""
+WARNING this is beta code!
+"""
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -6,7 +9,7 @@ import sys, os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from core import modules
-from core.modules import View, Interpolate, Identity, StaticBatchNorm2d
+from core.modules import View, Interpolate, Identity
 
 
 class Net(nn.Module):
@@ -14,12 +17,15 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         self.net_params = net_params
-        self.nonlin = getattr(nn, net_params['non_linearity'])
+        if hasattr(nn, net_params['non_linearity']):
+            self.nonlin = getattr(nn, net_params['non_linearity'])
+        else:
+            self.nonlin = getattr(modules, net_params['non_linearity'])
 
-        if net_params['batchnorm'] == "standard":
+        if net_params['batchnorm'] == "BatchNorm2d":
             self.batch_norm = nn.BatchNorm2d
-        elif net_params['batchnorm'] == "static":
-            self.batch_norm = StaticBatchNorm2d
+        elif net_params['batchnorm'] == "InstanceNorm2d":
+            self.batch_norm = nn.InstanceNorm2d
         else:
             raise NotImplementedError
 
@@ -35,33 +41,37 @@ class Net(nn.Module):
 
         self.conv1 = nn.Sequential(*[
             conv_block(in_channels=3, out_channels=self.base, kernel_size=kernel, stride=1, padding=self.padding,
-                       nonlin=self.nonlin, batch_norm=self.batch_norm),
+                       nonlin=self.nonlin, batch_norm=self.batch_norm, noise_std=net_params['noise']),
             conv_block(in_channels=self.base, out_channels=self.base, kernel_size=kernel, stride=1,
                        padding=self.padding,
-                       nonlin=self.nonlin, batch_norm=self.batch_norm),
+                       nonlin=self.nonlin, batch_norm=self.batch_norm, noise_std=net_params['noise']),
             conv_block(in_channels=self.base, out_channels=self.base, kernel_size=kernel, stride=1,
                        padding=self.padding,
-                       nonlin=self.nonlin, batch_norm=self.batch_norm)
+                       nonlin=self.nonlin, batch_norm=self.batch_norm, noise_std=net_params['noise'])
         ])
         self.conv2 = nn.Sequential(*[
             conv_block(in_channels=self.base, out_channels=self.base * 2, kernel_size=kernel, stride=1,
                        padding=self.padding,
-                       nonlin=self.nonlin, batch_norm=self.batch_norm),
+                       nonlin=self.nonlin, batch_norm=self.batch_norm, noise_std=net_params['noise']),
             conv_block(in_channels=self.base * 2, out_channels=self.base * 2, kernel_size=kernel, stride=1,
-                       padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm)
+                       padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm,
+                       noise_std=net_params['noise'])
         ])
         self.conv3 = nn.Sequential(*[
             conv_block(in_channels=self.base * 2, out_channels=self.base * 4, kernel_size=kernel, stride=1,
                        padding=self.padding,
-                       nonlin=self.nonlin, batch_norm=self.batch_norm),
+                       nonlin=self.nonlin, batch_norm=self.batch_norm, noise_std=net_params['noise']),
             conv_block(in_channels=self.base * 4, out_channels=self.base * 4, kernel_size=kernel, stride=1,
-                       padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm)
+                       padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm,
+                       noise_std=net_params['noise'])
         ])
         self.conv4 = nn.Sequential(
             *[conv_block(in_channels=self.base * 4, out_channels=self.base * 8, kernel_size=kernel, stride=1,
-                         padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm),
+                         padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm,
+                         noise_std=net_params['noise']),
               conv_block(in_channels=self.base * 8, out_channels=self.base * 8, kernel_size=kernel, stride=1,
-                         padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm)
+                         padding=self.padding, nonlin=self.nonlin, batch_norm=self.batch_norm,
+                         noise_std=net_params['noise'])
               ])
         self.classify = nn.Linear(self.base * 8, num_out)
         self.num_out = num_out

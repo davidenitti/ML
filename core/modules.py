@@ -1,3 +1,6 @@
+"""
+WARNING this is beta code!
+"""
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -23,6 +26,18 @@ class PixelNorm2d(nn.Module):
         return out
 
 
+class GaussianActivation(nn.Module):
+    def __init__(self):
+        super(GaussianActivation, self).__init__()
+        self.gain = nn.Parameter(torch.ones((1,)))
+        self.bias = nn.Parameter(-torch.ones((1,)))
+        self.mean = nn.Parameter(torch.zeros((1,)))
+        self.std = nn.Parameter(torch.ones((1,)))
+
+    def forward(self, x):
+        return torch.exp(-((x - self.mean) ** 2 / (self.std + 0.001) ** 2)) + self.bias
+
+
 class Noise(nn.Module):
     def __init__(self, noise_std):
         super(Noise, self).__init__()
@@ -44,6 +59,18 @@ class TanhMod(nn.Module):
     def forward(self, x):
         return self.tanh(x / self.scale) * self.scale
 
+
+class TanhScaled(nn.Module):
+    def __init__(self):
+        super(TanhScaled, self).__init__()
+        self.gain = nn.Parameter(torch.ones((1,)))
+        self.bias = nn.Parameter(torch.zeros((1,)))
+        self.bias2 = nn.Parameter(torch.zeros((1,)))
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        scale = self.gain ** 2 + 0.0001
+        return self.tanh((x + self.bias) / scale) * scale + self.bias2
 
 class ConvBlock2(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, nonlin, batch_norm,
@@ -80,7 +107,7 @@ class ConvBlock(nn.Module):
 
 
 class Identity(nn.Module):
-    def __init__(self, dummy=None):
+    def __init__(self, channels=None, affine=None):
         super(Identity, self).__init__()
 
     def forward(self, x):
