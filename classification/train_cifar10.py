@@ -228,6 +228,6 @@ if __name__ == '__main__':
     base_dir_dataset = '/home/davide/datasets'
     list_args = ['--dataset', base_dir_dataset,
                  '--res_dir', base_dir_res,
-                 '--sleep', '0.1']
+                 '--sleep', '0.01']
     args = get_args(list_args)
     hyper_tune(args)
