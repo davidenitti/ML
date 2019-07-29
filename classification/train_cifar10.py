@@ -114,7 +114,7 @@ def main(args, callback=None, upload_checkpoint=False):
         optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
     else:
         raise NotImplementedError
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.98)
     utils.load_model(args.checkpoint, model, optimizer, scheduler)
     best_acc = 0.0
     for epoch in range(1, args.epochs + 1):
