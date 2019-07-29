@@ -69,7 +69,7 @@ class TanhScaled(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, x):
-        scale = self.gain ** 2 + 0.0001
+        scale = torch.abs(self.gain) + 0.001
         return self.tanh((x + self.bias) / scale) * scale + self.bias2
 
 class ConvBlock2(nn.Module):
