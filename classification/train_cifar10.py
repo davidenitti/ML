@@ -184,7 +184,6 @@ def hyper_tune(args, callback=None, upload_checkpoint=False):
                 for conv_block in ['ResNetBlock', 'ConvBlock']:
                     for non_lin in ['ReLU']:
                         for batchnorm in ['BatchNorm2d']:
-
                             args.net_params = {'non_linearity': non_lin,
                                                'last_pool': pool,
                                                'padding': True,
