@@ -78,37 +78,6 @@ class Net(nn.Module):
         print('net v 1.1')
         self.debug = False
 
-        if net_params['autoencoder']:
-            self.eval()
-            shape_enc = self.forward(torch.randn(shape), True)
-            self.train()
-            # self.upconv1 = nn.Sequential(*[
-            #     View([-1]), nn.Linear(shape_enc[1]*shape_enc[2]*shape_enc[3], self.upconv_chan * self.upconv_size * self.upconv_size),
-            #     View([self.upconv_chan, self.upconv_size, self.upconv_size]),
-            #     self.non_lin(),
-            #     nn.Conv2d(self.upconv_chan, self.upconv_chan, 3, 1, padding=1),
-            #     self.norm(self.upconv_chan, affine=True),
-            #     self.non_lin()])
-            list_upconv2 = []
-            chan = shape_enc[1]
-            for i in range(2):
-                new_chan = int(chan // 2)
-                list_upconv2 += [nn.Upsample(scale_factor=2, mode='nearest'),
-                                 conv_block(chan, new_chan, kernel_size=kernel, stride=1, padding=1, nonlin=self.nonlin,
-                                            batch_norm=self.batch_norm)]
-                list_upconv2 += [
-                    conv_block(new_chan, new_chan, kernel_size=kernel, stride=1, padding=1, nonlin=self.nonlin,
-                               batch_norm=self.batch_norm)]
-                chan = new_chan
-
-            self.upconv2 = nn.Sequential(*list_upconv2)
-
-            self.upconv_rec = nn.Sequential(*[
-                conv_block(chan, 3, kernel_size=kernel, stride=1, padding=1, nonlin=Identity,
-                           batch_norm=self.batch_norm),
-                Interpolate((shape[2], shape[3]), mode='bilinear'),
-                nn.Tanh()])
-
     def decoding(self, encoding):
         debug = self.debug
         # x = self.upconv1(encoding)
@@ -127,9 +96,6 @@ class Net(nn.Module):
         if self.debug:
             print(x.shape)
 
-        if self.net_params['random_pad']:
-            x = torch.cat((torch.randn_like(x), x, torch.randn_like(x)), dim=2)
-            x = torch.cat((torch.randn_like(x), x, torch.randn_like(x)), dim=3)
         x = self.conv1(x)
 
         if self.debug:
@@ -164,14 +130,10 @@ class Net(nn.Module):
 
         if get_shape_enc:
             return x.shape
-        if self.net_params['autoencoder']:
-            x_decoded = self.decoding(x)
+
         if self.debug:
             print(x.shape)
-        if self.net_params['random_pad']:
-            n_features = x.shape[3]
-            x = x[:, :, n_features // 4:-n_features // 4, n_features // 4:-n_features // 4]
-            # print(x.shape)
+
         x = self.last_pool(x, x.shape[1])
         if self.debug:
             print(x.shape)
@@ -181,6 +143,5 @@ class Net(nn.Module):
         x = self.classify(x)
         if self.debug:
             print(x.shape)
-        if self.net_params['autoencoder']:
-            return x, x_decoded
+
         return x

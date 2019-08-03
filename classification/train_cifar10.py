@@ -1,7 +1,6 @@
 """
 WARNING this is beta code!
 """
-from __future__ import print_function
 import argparse
 import torch
 import torch.nn.functional as F
@@ -32,15 +31,11 @@ def train(args, model, device, train_loader, optimizer, epoch, scheduler):
         time.sleep(args.sleep)
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
-        if args.net_params['autoencoder']:
-            output, decoded = model(data)
-        else:
-            output = model(data)
+        output = model(data)
         if epoch == 1:
             model.debug = False
         loss = F.cross_entropy(output, target)
-        if args.net_params['autoencoder']:
-            loss += 0.4 * torch.mean((data - decoded) ** 2)
+
         total_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -64,10 +59,7 @@ def test(args, model, device, test_loader):
         for data, target in test_loader:
             num += 1
             data, target = data.to(device), target.to(device)
-            if args.net_params['autoencoder']:
-                output, decoded = model(data)
-            else:
-                output = model(data)
+            output = model(data)
             assert output.shape[1] > target.max().item()
             test_loss += F.cross_entropy(output, target).item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
@@ -111,7 +103,7 @@ def main(args, callback=None, upload_checkpoint=False):
     if args.optimizer.lower() == "adam":
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer.lower() == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.8)
     else:
         raise NotImplementedError
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.98)
@@ -140,17 +132,17 @@ def main(args, callback=None, upload_checkpoint=False):
 def get_args(args_list):
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10')
     parser.add_argument('--batch-size', type=int, default=128,
-                        help='input batch size for training (default: 64)')
+                        help='input batch size for training')
     parser.add_argument('--test-batch-size', type=int, default=1000,
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='number of epochs to train (default: 10)')
+                        help='input batch size for testing')
+    parser.add_argument('--epochs', type=int, default=110,
+                        help='number of epochs to train')
     parser.add_argument('--lr', type=float, default=None,
                         help='learning rate')
     parser.add_argument('--sleep', type=float, default=0.01,
                         help='sleep')
     parser.add_argument('--weight_decay', type=float, default=1e-6,
-                        help='learning rate (default: 0.01)')
+                        help='weight decay')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=1,
@@ -165,11 +157,9 @@ def get_args(args_list):
                         help='dataset path')
 
     parser.add_argument('--net_params', default={'non_linearity': "ReLU",
-                                                 'random_pad': False,
                                                  'last_pool': 'avg_pool2d',
                                                  'padding': True,
                                                  'base': 32,
-                                                 'autoencoder': False,
                                                  'batchnorm': 'BatchNorm2d',
                                                  'conv_block': 'ResNetBlock',
                                                  'kernel_size': 3,
@@ -188,46 +178,38 @@ def get_args(args_list):
 
 def hyper_tune(args, callback=None, upload_checkpoint=False):
     # args = get_args(list_args)
-    for autoencoder in [False, True]:
-        for pool in ['avg_pool2d', 'max_pool2d']:
-            for noise in [0.0, 0.02, 0.04]:
-                for base in [64]:
-                    for conv_block in ['ResNetBlock']:
-                        for non_lin in ['TanhScaled', 'LeakyReLU', 'ReLU', "PReLU", 'ReLU6']:
-                            for batchnorm in ['BatchNorm2d']:
+    for pool in ['avg_pool2d', 'max_pool2d']:
+        for noise in [0.0, 0.01, 0.02]:
+            for base in [64]:
+                for conv_block in ['ResNetBlock', 'ConvBlock']:
+                    for non_lin in ['ReLU']:
+                        for batchnorm in ['BatchNorm2d']:
 
-                                args.net_params = {'non_linearity': non_lin,
-                                                   'random_pad': False,
-                                                   'last_pool': pool,
-                                                   'padding': True,
-                                                   'base': base,
-                                                   'autoencoder': autoencoder,
-                                                   'batchnorm': batchnorm,
-                                                   'conv_block': conv_block,
-                                                   'kernel_size': 3,
-                                                   'noise': noise
-                                                   }
-                                args.checkpoint = ""  # checkpoint not needed
-                                results_path = os.path.join(args.res_dir, 'results_cifar10.json')
-                                already_done = False
-                                if os.path.exists(results_path):
-                                    with open(results_path, 'r') as f:
-                                        results = json.load(f)
-                                    for r in results['res']:
-                                        if r[0] == vars(args):
-                                            already_done = True
-                                            print('already done skip', args)
-                                if not already_done:
-                                    main(args)
-                                    if callback is not None:
-                                        callback()
+                            args.net_params = {'non_linearity': non_lin,
+                                               'last_pool': pool,
+                                               'padding': True,
+                                               'base': base,
+                                               'batchnorm': batchnorm,
+                                               'conv_block': conv_block,
+                                               'kernel_size': 3,
+                                               'noise': noise
+                                               }
+                            args.checkpoint = ""  # checkpoint not needed
+                            results_path = os.path.join(args.res_dir, 'results_cifar10.json')
+                            already_done = False
+                            if os.path.exists(results_path):
+                                with open(results_path, 'r') as f:
+                                    results = json.load(f)
+                                for r in results['res']:
+                                    if r[0] == vars(args):
+                                        already_done = True
+                                        print('already done skip', args)
+                            if not already_done:
+                                main(args)
+                                if callback is not None:
+                                    callback()
 
 
 if __name__ == '__main__':
-    base_dir_res = "../../../results"
-    base_dir_dataset = '/home/davide/datasets'
-    list_args = ['--dataset', base_dir_dataset,
-                 '--res_dir', base_dir_res,
-                 '--sleep', '0.01']
-    args = get_args(list_args)
+    args = get_args(None)
     hyper_tune(args)
