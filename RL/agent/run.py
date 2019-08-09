@@ -177,7 +177,7 @@ def main(numavg=100,params=None, sleep=0.0):
             env.monitor.close()
         print(agent.config)
 
-        #gym.upload(resultsdir, writeup='https://gist.github.com/davidenitti/c6cd38cd1151ccc0248da8fe1f78e6ee', api_key='sk_7mpGWQjpTmWMv4ym739Xg')# gym.upload(resultsdir, api_key='YOURAPI')
+        #gym.upload(resultsdir, writeup='https://gist.github.com/davidenitti/c6cd38cd1151ccc0248da8fe1f78e6ee', api_key='')# gym.upload(resultsdir, api_key='YOURAPI')
     except Exception as e:
         print('Exception',e)
         agent.coord.request_stop(e)
