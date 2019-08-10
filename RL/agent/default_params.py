@@ -27,7 +27,8 @@ def get_default(nameenv):
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.01,
             "decay": 0.995,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.0007,
+            "initial_learnrate": 0.001,
+            "eps_optim": 1e-8, # 1.5e-4 before
             "decay_learnrate": 0.9999,
             "discount": 0.99,
             "batch_size": 256,
@@ -35,12 +36,11 @@ def get_default(nameenv):
             "hiddenlayers": [10],
             "sharedlayers":[60],
             "regularization": 0.0,
-            "file": None,
+            "path_exp": None,
             "activation": 'elu', # tanh, sigmoid, relu, elu
             "conv":False,
             "scaling": 'none',
-            "seed": -1,
-            "threads": 0
+            "seed": -1
             }
     elif nameenv == 'Acrobot-v1':
         params = {
@@ -76,14 +76,13 @@ def get_default(nameenv):
             "hiddenlayers": [],
             "sharedlayers": [32],
             "regularization": 0.0000,
-            "file": None,
+            "path_exp": None,
             "activation": 'leaky_relu',
             "conv":False,
             "scaling": 'none',
             "seed": -1,
             "terminal_life": False,
-            "start_episode": 0,
-            "threads": 0
+            "start_episode": 0
             }
     elif nameenv == 'LunarLander-v2':
         params = {
@@ -93,6 +92,7 @@ def get_default(nameenv):
             "loss":"clipmse",
             "optimizer":"adam",
             "initial_learnrate": 0.00025,
+            "eps_optim": 1e-4,
             "decay_learnrate": 1,
             "lambda": 0.,
             "eps": 0.6,  # Epsilon in epsilon greedy policies
@@ -118,23 +118,24 @@ def get_default(nameenv):
             "hiddenlayers": [],
             "sharedlayers": [256],
             "regularization": 0.000000,
-            "file": None,
+            "path_exp": None,
             "activation": 'leaky_relu',
             "conv":False,
             "scaling": 'none',
             "seed": 3,
             "start_episode": 0,
-            "terminal_life": False,
-            "threads": 0
+            "terminal_life": False
         }
     elif nameenv == 'Breakout-v0':
         params = {
             "terminal_life": True,
+            "normalize": False,
             "loss":"clipmse",
             "start_episode": 0,
-            "memsize": 1000000,
+            "memsize": 280000,
             "randstart": 5000,
             "policy":False,
+            "priority_memory": False,
             "batch_norm": False,
             "discounted_policy_grad":False,
             "scalereward": 0.1,
@@ -151,22 +152,23 @@ def get_default(nameenv):
             "mineps": 0.1,
             "testeps": 0.05,
             "decay": 0.9996,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.00015,
+            "initial_learnrate": 0.00025,
+            "momentum": 0.9,
+            "eps_optim": 1e-2, # 1e-3
+            "discount": 0.99, # 0.98
             "ratio_policy_learnrate": 1,
             "final_learnrate": 0.0001,
             "decay_learnrate": 1,
-            "discount": 0.98,
             "batch_size": 32,
             "hiddenlayers": [256],
-            "regularization": [0.0000000,0.0000000,0.0000000],
-            "activation":'elu',
+            "regularization": 0,
+            "activation":'relu',
             "convlayers": [[8, 8, 4, 16], [4, 4, 2, 32]],
             "scaling":'crop',
             "dimdobs":(84,84,1),
-            "file": None,
+            "path_exp": None,
             "conv":True,
             "seed": -1,
-            "threads": 0,
             "initializer": 'fixed',
             "sharedlayers": []}
     elif nameenv == 'Pong-v0':
@@ -175,7 +177,7 @@ def get_default(nameenv):
             "storememory": False,
             "memoryfile": "/tmp/Pong2",
             "memorydir": "/tmp/memory",
-            "replace": [],#"copyQ","memsize","initial_learnrate","decay_learnrate"],#"discount","episodic","activation","file","storememory","momentum","scalereward","probupdate","lambda","initial_learnrate","eps","batch_size","iterations","memsize"],
+            "replace": [],#"copyQ","memsize","initial_learnrate","decay_learnrate"],#"discount","episodic","activation","path_exp","storememory","momentum","scalereward","probupdate","lambda","initial_learnrate","eps","batch_size","iterations","memsize"],
             "scalereward": 1.,
             "copyQ": 10,
             "probupdate": .02,
@@ -193,7 +195,7 @@ def get_default(nameenv):
             "regularization": [0.000000001],
             "activation":'tanh',
             "momentum": 0.8,
-            "file": "pong-model_new15",
+            "path_exp": None,
             "conv":True,
             "diffstate":False,
             "seed": 1}

@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import ast
 import pickle,os,sys
 
@@ -47,31 +48,66 @@ def str2list(s):
     return ast.literal_eval(s)
 
 
-def init_log(params):
-    if params['logging']==0:
-        loglevel = logging.DEBUG
-    elif params['logging']==1:
-        loglevel = logging.INFO
-    elif params['logging']==2:
-        loglevel = logging.WARNING
-    elif params['logging']==3:
-        loglevel = logging.ERROR
-    logger = logging.getLogger(__name__)
-    logger.setLevel(loglevel)
-    logger.propagate=False
-    if params["file"] is not None:
-        handler = logging.FileHandler(params["file"]+'.log')
+BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
+
+RESET_SEQ = "\033[0m"
+COLOR_SEQ = "\033[1;%dm"
+BOLD_SEQ = "\033[1m"
+
+
+def formatter_message(message, use_color=True):
+    if use_color:
+        message = message.replace("$RESET", RESET_SEQ).replace("$BOLD", BOLD_SEQ)
+    else:
+        message = message.replace("$RESET", "").replace("$BOLD", "")
+    return message
+
+
+COLORS = {
+    'WARNING': YELLOW,
+    'INFO': BLUE,
+    'DEBUG': WHITE,
+    'CRITICAL': YELLOW,
+    'ERROR': RED
+}
+
+
+class ColoredFormatter(logging.Formatter):
+    def __init__(self, msg, use_color=True):
+        logging.Formatter.__init__(self, msg)
+        self.use_color = use_color
+
+    def format(self, record):
+        levelname = record.levelname
+        if self.use_color and levelname in COLORS:
+            levelname_color = COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
+            record.levelname = levelname_color
+        return logging.Formatter.format(self, record)
+
+
+def init_logger(log_path, level='INFO', mode='w'):
+    """
+    initialize the logger in the main script
+    """
+    level_console = getattr(logging,level)
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    formatter = logging.Formatter('[%(name)s][%(levelname)s] %(message)s (%(filename)s:%(lineno)d)')  # %(asctime)s -
+    if log_path:
+        handler = logging.FileHandler(log_path, mode=mode)
         handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
-        logger.addHandler(handler)
 
-        ch = logging.StreamHandler()
-        ch.setLevel(loglevel)
+    console_handler = logging.StreamHandler()
+    FORMAT = "[$BOLD%(name)-0s$RESET][%(levelname)-0s]  %(message)s ($BOLD%(filename)s$RESET:%(lineno)d)"
+    color_format = formatter_message(FORMAT, True)
+    formatter2 = ColoredFormatter(color_format)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(level_console)
 
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-        ch.setFormatter(formatter)
-
-        logger.addHandler(ch)
-    return logger
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if log_path:
+        root.addHandler(handler)
+    root.addHandler(console_handler)

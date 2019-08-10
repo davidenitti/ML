@@ -1,6 +1,8 @@
-import run
+import logging
+from agent import run
+logger = logging.getLogger(__name__)
 
-def main():
+def example_experiment():
     repeat = 5
     avg_rew = 0.0
     episodes = 100000
@@ -9,7 +11,7 @@ def main():
     reward_list = []
 
     for i in range(repeat):
-        reward, allparams, totrewlist, totrewavglist, greedyrewlist, reward_threshold = run.main(100,params.copy(),sleep)
+        reward, allparams, totrewlist, totrewavglist, greedyrewlist, reward_threshold = run.main(params.copy(),numavg=100,sleep=sleep)
         reward_list.append(reward)
         avg_rew+=reward
     avg_rew/=repeat
@@ -18,4 +20,4 @@ def main():
     print("rew list",reward_list)
 
 if __name__ == '__main__':
-    main()
+    run.main(None)

@@ -3,6 +3,8 @@ import time
 import cv2
 import threading
 import random
+import logging
+logger = logging.getLogger(__name__)
 
 def onehot(i, n):
     out = np.zeros(n)
@@ -13,7 +15,7 @@ def onehot(i, n):
 def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, discount=1,
                learn=True, sleep=0.):
     if num_steps == None:
-        num_steps = env.spec.timestep_limit
+        num_steps = env.spec.max_episode_steps
     total_rew = 0.
     total_rew_discount = 0.
     cost = 0.
@@ -86,27 +88,25 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
 
         agent.memory.add([ob1, a, limitreward, 1. - 1. * terminal_memory, t, None])
         start_time3 = time.time()
-        if agent.config['threads'] == 0:
-            if learn and (not agent.config['policy']):
-                cost += agent.learn()
-            elif ((t + 1) % agent.config['batch_size'] == 0 or done) and agent.config['policy'] and agent.config[
-                'threads'] == 0:
-                # raise NotImplemented("startind not good for circular buffer")
-                agent.learnpolicy()
-                agent.memory.memoryLock.acquire()
-                agent.memory.empty()
-                agent.memory.memoryLock.release()
+        if learn and (not agent.config['policy']):
+            cost += agent.learn()
+        elif ((t + 1) % agent.config['batch_size'] == 0 or done) and agent.config['policy']:
+            # raise NotImplemented("startind not good for circular buffer")
+            agent.learnpolicy()
+            agent.memory.memoryLock.acquire()
+            agent.memory.empty()
+            agent.memory.memoryLock.release()
 
         total_rew_discount += limitreward * (discount ** t) #using limited reward
         total_rew += reward
 
         if (t % 200 == 0 or done):
             if agent.config['policy']:
-                print(agent.config['file'], 'episode', episode, t, done, 'V', agent.evalV(ob1[None,...], True), limitreward)
+                logger.debug("{} episode {} step {} done {} V {} limitedrew {}".format(agent.config["path_exp"], episode, t, done, agent.evalV(ob1[None,...], True), limitreward))
             else:
                 q_val = agent.evalQ(ob1[None,...])
                 max_qval = max(max_qval,np.max(q_val))
-                print(agent.config['file'], 'episode', episode, t, done, 'Q', q_val,"limitedreward", limitreward)
+                logger.debug("{} episode {} step {} done {} Q {} limitedrew {}".format(agent.config["path_exp"], episode, t, done, 'Q', q_val, limitreward))
 
         ob1 = obnew1
         ob = obnew
@@ -154,6 +154,7 @@ def adjust_learning_rate(optimizer, lr):
 
 class ReplayMemory(object):
     def __init__(self, max_size=100000, copy=False,  use_priority=False):
+        self.mem2 = None
         self.mem = []
         self.max_size = max_size
         self.memoryLock = threading.Lock()
@@ -168,6 +169,7 @@ class ReplayMemory(object):
 
     def empty(self):
         self.mem = []
+        self.mem2 = None
         self.last_ind = -1
         self.start_ind = -1
 
@@ -176,10 +178,10 @@ class ReplayMemory(object):
         idx = (self.start_ind + item) % self.max_size
         if self.copy:
             self.memoryLock.acquire()
-            val = self.mem[idx].deepcopy()
+            val = [self.mem2[idx].deepcopy()]+self.mem[idx].deepcopy()
             self.memoryLock.release()
         else:
-            val = self.mem[idx]
+            val = [self.mem2[idx]]+self.mem[idx]
         return val
 
     def set_priority(self, idx, vals):  # item has to be from 0 to len(mem)-1
@@ -208,12 +210,16 @@ class ReplayMemory(object):
         self.last_ind += 1
         self.last_ind = self.last_ind % self.max_size
         if len(self.mem) >= self.max_size:
-            self.mem[self.last_ind] = example
+            self.mem[self.last_ind] = example[1:]
+            self.mem2[self.last_ind] = example[0]
             if self.use_priority:
                 self.priority[self.last_ind] = self.max_priority
             self.start_ind = (self.last_ind + 1) % self.max_size  # circular buffer
         else:
-            self.mem.append(example)
+            self.mem.append(example[1:])
+            if self.mem2 is None:
+                self.mem2 = np.zeros([self.max_size]+list(example[0].shape),dtype=example[0].dtype)
+            self.mem2[self.last_ind] = example[0]
             if self.use_priority:
                 self.priority[self.sizemem()-1] = self.max_priority
             self.start_ind = 0

@@ -3,56 +3,50 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import tensorflow as tf
-import os, shutil
+import os, sys, shutil
 import gym
 import time
-import threading
 import numpy as np
-import common
 from torch.autograd import Variable
-import models
-from agent_utils import ReplayMemory, onehot, vis
+import logging
+from . import common
+from . import models
+from .agent_utils import ReplayMemory, onehot, vis
 import json
+import pickle
 
 import copy
 
 import matplotlib.pyplot as plt0
-
-plt0.ion()
+try:
+    import IPython.display  # for ipython/notebook compatibility
+except:
+    plt0.ion()
+logger = logging.getLogger(__name__)
 
 class deepQconv(object):
     def save(self, filename=None):
         if filename is None:
-            filename = self.config['file']
+            filename = self.config["path_exp"]
         with open(filename + ".json", "w") as input_file:
             json.dump(self.config, input_file, indent=3)
-        # with open(filename + ".p", "wb") as input_file:
-        #     pickle.dump({"mem": self.memory.mem,"mem_start": self.memory.start_ind, "mem_last": self.memory.last_ind},
-        #                 input_file)
+        # with open(filename + "_mem.p", "wb") as input_file:
+        #     pickle.dump(self.memory, input_file)
         checkpoint = {"optimizer": self.optimizer.state_dict()}
         for m in self.model_dict:
             checkpoint[m] = self.model_dict[m].state_dict()
         torch.save(checkpoint, filename + ".pth")
 
-    def __init__(self, logger, observation_space, action_space, reward_range, userconfig):
-        self.logger = logger
+    def __init__(self, observation_space, action_space, reward_range, userconfig):
 
-        if userconfig["file"] is not None:
-            self.log_dir = userconfig["file"]
-            print(self.log_dir)
+        if userconfig["path_exp"]:
+            self.log_dir = userconfig["path_exp"]
             if os.path.exists(self.log_dir):
                 shutil.rmtree(self.log_dir)
             os.makedirs(self.log_dir)
         else:
             self.log_dir = None
 
-        # if userconfig["file"] is not None and os.path.isfile(userconfig["file"] + ".json"):
-        #     with open(userconfig["file"] + ".json", "r") as input_file:
-        #         self.config = json.load(input_file)
-        #     self.config["file"] = userconfig["file"]
-        #     # with open(userconfig["file"] + ".p", "rb") as input_file:
-        #     #     self.observation_space, self.action_space, self.reward_range = pickle.load(input_file)
-        # else:
         self.config = userconfig
         self.observation_space = observation_space
         self.action_space = action_space
@@ -67,59 +61,7 @@ class deepQconv(object):
         self.learnrate = self.config['initial_learnrate']
         self.initQnetwork()
 
-    def learn_thread(self, force=True, print_it=True, delay=0.00000001, policygrad=False):
-        try:
-            while not self.coord.should_stop():
-                if policygrad:
-                    self.learnpolicy()
-                else:
-                    self.learn(force, print_it)
-                time.sleep(delay)
-        except Exception as e:
-            print('Exception', e)
-            self.coord.request_stop(e)
-            raise e
 
-    def start_async_learning(self, delay=0.00000001):
-        num_threads = self.config['threads']
-        for _ in range(num_threads):
-            ln = threading.Thread(target=self.learn_thread, args=(True, True, delay, self.config['policy']))
-            ln.start()
-            self.workers.append(ln)
-
-    def start_async_plot(self, arg, plt, winplot, numplot=0, start_episode=0):
-        lists, reward_threshold = arg
-        if self.useConv:
-            ww = [c.weight.cpu().data.numpy() for c in self.shared.conv]
-        else:
-            ww = []
-        t = threading.Thread(target=self.loopplot,
-                             args=(ww, lists, reward_threshold, plt, winplot, numplot, start_episode))
-        # t = multiprocessing.Process(target=self.processPlot, args=(arg, plt, winplot))
-        t.start()
-        self.workers.append(t)
-
-    def stop_threads(self):
-        self.coord.request_stop()
-        for t in self.workers:
-            t.join()
-
-    def loopplot(self, ww, lists, reward_threshold, plt, plot=True, numplot=0, start_episode=0):
-        totrewlist, totrewavglist, greedyrewlist = lists
-        while not self.coord.should_stop():
-            if len(totrewlist) > 10:
-                self.plot(ww, lists, reward_threshold, plt, plot=plot, numplot=numplot, start_episode=start_episode)
-                if plot == False:
-                    for _ in range(60):
-                        if not self.coord.should_stop():
-                            time.sleep(2.)
-                        else:
-                            break
-            else:
-                if plot:
-                    time.sleep(5.)
-                else:
-                    time.sleep(1.)
 
     def plot(self, w, lists, reward_threshold, plt, plot=True, numplot=0, start_episode=0):
         width = 15000
@@ -127,7 +69,7 @@ class deepQconv(object):
         if len(totrewlist) > 5:
             if plot:
                 fig = plt.figure(numplot)
-                fig.canvas.set_window_title(str(self.config["file"]) + " " + str(self.config))
+                fig.canvas.set_window_title(str(self.config["path_exp"]) + " " + str(self.config))
 
             plt.clf()
             plt.xlim(start_episode + max(-1, len(totrewlist) / 50 * 50 - width),
@@ -143,45 +85,28 @@ class deepQconv(object):
             plt.scatter(greedyrewlist[1], greedyrewlist[0], color='black')
             plt.plot([start_episode + max(0, len(totrewlist) - 1 - 100), start_episode + len(totrewlist) - 1],
                      [np.mean(np.array(totrewlist[-100:])), np.mean(np.array(totrewlist[-100:]))], color='black')
-            if self.config["file"] is not None:
-                plt.savefig(self.config["file"] + '_reward' + '.png', dpi=400)
-            # else:
-            #    plt.savefig('/tmp/reward_temp.png', dpi=200)
-            # if args.plot.lower() == "true":
-            #    fig = plt.figure(1)
-            #    fig.canvas.set_window_title(str(agent.config["file"]) + " " + str(agent.config))
-            # plt.clf()
-            # plt.plot(range(len(stepslist)), stepslist, color='black')
-            # if agent.config["file"] is not None:
-            #    plt.savefig('steps_'+agent.config["file"]+'.png', dpi=500)
+            if self.config["path_exp"]:
+                plt.savefig(self.config["path_exp"] + '_reward' + '.png', dpi=400)
+
             ymin, ymax = plt.gca().get_ylim()
             xmin, xmax = plt.gca().get_xlim()
             plt.text(xmin,ymax, str(self.config), ha='left', wrap=True, fontsize=18)
             if self.config['conv'] and False:  # fixme
                 if plot:
                     fig = plt.figure(2)
-                    fig.canvas.set_window_title(str(self.config["file"]) + " " + str(self.config))
+                    fig.canvas.set_window_title(str(self.config["path_exp"]) + " " + str(self.config))
 
                 self.memory.memoryLock.acquire()
                 if self.memory.sizemem() > 1:
                     selec = np.random.choice(self.memory.sizemem() - 1)
                     imageselected = self.memory[selec][0].copy()
                     self.memory.memoryLock.release()
-                    # filtered1 = self.sess.run(self.convout[0], feed_dict= \
-                    #     {self.x: imageselected.reshape(tuple([1] + list(imageselected.shape)))})
-                    # if len(self.convout) > 1:
-                    #     filtered2 = self.sess.run(self.convout[1], feed_dict= \
-                    #         {self.x: imageselected.reshape(tuple([1] + list(imageselected.shape)))})
-                    # else:
-                    #     filtered2 = filtered1
-                    # print(imageselected.shape, imageselected.min(), imageselected.max(),
-                    #       filtered1[0].shape, filtered2[0].shape)
                     filtered1 = np.zeros((1, 1, 10, 10))
                     filtered2 = np.zeros((1, 1, 10, 10))
                     vis(plt, w, imageselected, filtered1[0], filtered2[0])
 
-                    if self.config["file"] is not None and plot == False:
-                        plt.savefig(self.config["file"] + '_features' + '.png', dpi=300)
+                    if self.config["path_exp"] and plot == False:
+                        plt.savefig(self.config["path_exp"] + '_features' + '.png', dpi=300)
 
                 else:
                     self.memory.memoryLock.release()
@@ -203,7 +128,7 @@ class deepQconv(object):
 
             if plot:
                 plt.draw()
-                # plt.pause(.5)
+                plt.pause(.001)
                 fig.canvas.flush_events()
         time.sleep(2.0)
 
@@ -303,13 +228,13 @@ class deepQconv(object):
 
     def initQnetwork(self):
         self.model_dict = {}
-        if self.config['file'] is not None and os.path.isfile(self.config['file'] + ".pth"):
-            checkpoint = torch.load(self.config['file'] + ".pth")
+        if self.config["path_exp"] is not None and os.path.isfile(self.config["path_exp"] + ".pth"):
+            checkpoint = torch.load(self.config["path_exp"] + ".pth")
         else:
             checkpoint = None
         learnable_parameters = []
         self.commoninit()
-        use_cuda = True  # fixme
+        use_cuda = self.config['use_cuda']
         self.device = torch.device("cuda" if use_cuda else "cpu")
         if self.isdiscrete:
             print('scaled', self.scaled_obs)
@@ -395,6 +320,8 @@ class deepQconv(object):
 
         if self.config['policy'] == False:
             if self.config['doubleQ']:
+                raise NotImplementedError
+                #fixme to remove (old tf implementation)
                 self.singleQ2 = tf.reduce_sum(self.curraction * self.Q2,
                                               reduction_indices=1)  # tf.reduce_sum(input_tensor, reduction_indices, keep_dims, name)#tf.slice(self.Q, [0,self.curraction],[-1,1])  #self.Q[:,self.out]
                 with tf.variable_scope('copyQ', reuse=True):
@@ -425,6 +352,7 @@ class deepQconv(object):
             #     pass  # self.errorlist = 0.5 * delta ** 2  # tf.minimum(0.5 * delta ** 2, tf.abs(delta))  # (self.singleQ - self.y) ** 2
             # print('errorlist', self.errorlist.get_shape())
             if self.config['doubleQ']:
+                # fixme to remove (old tf implementation)
                 if self.config['clip'] > 0 and "cliptype" in self.config and self.config['cliptype'] == 'deltaclip':
                     self.errorlist2 = clipdelta(delta2, self.config['clip'])
                 else:
@@ -437,8 +365,9 @@ class deepQconv(object):
             #    self.cost+= tf.add_n(regul)
             # tf.summary.histogram('cost', self.cost)
             if self.config['doubleQ']:
+                # fixme to remove (old tf implementation)
                 if regul != []:
-                    self.logger.warning("doubleQ with regularization not properly implemented")
+                    logger.warning("doubleQ with regularization not properly implemented")
                 self.cost2 = tf.reduce_mean(self.errorlist2)
                 self.optimizer2 = tf.train.RMSPropOptimizer(self.learnrate, decay=self.config['decayoptimizer'],
                                                             momentum=self.config['momentum'],
@@ -449,21 +378,25 @@ class deepQconv(object):
                 else:
                     self.optimizer2 = self.optimizer2.minimize(self.cost2, global_step=self.global_step)
 
-        if 'optimizer' in self.config and self.config['optimizer'] == "adam":
-            self.optimizer = torch.optim.Adam(learnable_parameters, lr=self.learnrate,
+        if 'optimizer' in self.config:
+            if self.config['optimizer'] == "adam":
+                self.optimizer = torch.optim.Adam(learnable_parameters, lr=self.learnrate,
                                               weight_decay=self.config['regularization'],
-                                              eps=1.5e-4)
-            print("adam")
+                                              eps=self.config['eps_optim'])
+            elif self.config['optimizer'] == "sgd":
+                self.optimizer = torch.optim.SGD(learnable_parameters, lr=self.learnrate,
+                                                 weight_decay=self.config['regularization'],
+                                                 momentum=self.config['momentum'])
+            else:
+                raise NotImplementedError
         else:
             self.optimizer = torch.optim.RMSprop(learnable_parameters, lr=self.learnrate,
-                                                 momentum=0.0,
+                                                 momentum=self.config['momentum'],
                                                  weight_decay=self.config['regularization'],
                                                  alpha=0.95,
-                                                 eps=1e-5)
-        # if checkpoint is not None:
-        #    self.optimizer.load_state_dict(checkpoint["optimizer"])
-        self.coord = tf.train.Coordinator()
-        self.workers = []
+                                                 eps=self.config['eps_optim'])
+        if checkpoint is not None:
+           self.optimizer.load_state_dict(checkpoint["optimizer"])
 
         if 'num_updates' not in self.config:
             self.config['num_updates'] = 0
@@ -473,7 +406,6 @@ class deepQconv(object):
         print((self.config['memsize'],) + tuple(n_input))
 
     def learn(self, force=False, print_iteration=False):
-
         for m in self.model_dict:
             self.model_dict[m].train()
         if self.config['copyQ'] > 0 and self.config['num_updates'] % self.config['copyQ'] == 0:
@@ -551,12 +483,12 @@ class deepQconv(object):
                             self.y: alltarget.reshape((-1, 1)),
                             self.curraction: allactionsparse})
                 else:
-                    allactionsparse = Variable(torch.from_numpy(allactionsparse).float()).to(self.device,non_blocking=True)
-                    allstate = Variable(torch.from_numpy(allstate).float()).to(self.device,non_blocking=True)
-                    nextstates = Variable(torch.from_numpy(nextstates).float()).to(self.device,non_blocking=True)
-                    currew = Variable(torch.from_numpy(currew.reshape((-1,))).float()).to(self.device,non_blocking=True)
-                    notdonevec = Variable(torch.from_numpy(notdonevec.reshape((-1,))).float()).to(self.device,non_blocking=True)
-                    maxsteps_reward = Variable(torch.from_numpy(maxsteps_reward.reshape((-1,))).float()).to(self.device,non_blocking=True)
+                    allactionsparse = torch.from_numpy(allactionsparse).float().to(self.device,non_blocking=True)
+                    allstate = torch.from_numpy(allstate).float().to(self.device,non_blocking=True)
+                    nextstates = torch.from_numpy(nextstates).float().to(self.device,non_blocking=True)
+                    currew = torch.from_numpy(currew.reshape((-1,))).float().to(self.device,non_blocking=True)
+                    notdonevec = torch.from_numpy(notdonevec.reshape((-1,))).float().to(self.device,non_blocking=True)
+                    maxsteps_reward = torch.from_numpy(maxsteps_reward.reshape((-1,))).float().to(self.device,non_blocking=True)
                     shared_features = self.shared(allstate)
                     if self.config['copyQ'] > 0:
                         next_shared_features = self.copy_shared(nextstates)
@@ -644,7 +576,7 @@ class deepQconv(object):
 
     def plot_state(self, state_list):  # fixme use plt instead of plt0
         fig = plt0.figure(2)
-        fig.canvas.set_window_title(str(self.config["file"]) + " " + str(self.config))
+        fig.canvas.set_window_title(str(self.config["path_exp"]) + " " + str(self.config))
 
         plt0.clf()
         plt0.plot(state_list[0][0], state_list[0][1], color='black')
@@ -768,7 +700,8 @@ class deepQconv(object):
             # v_loss = v_loss/v_loss.detach()
             # errorpolicy = errorpolicy/errorpolicy.detach()
             loss = errorpolicy +  3*v_loss  # fixme
-
+            if torch.isnan(logpolicy).any():
+                print("a",allactions, logpolicy, targetp,"logit",logit)
             loss.backward()
             self.optimizer.step()
 
@@ -834,7 +767,7 @@ class deepQconv(object):
                 var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
                 shared_features = self.shared(var_obs)
                 if np.random.random() < 0.001:
-                    print("shared_features", shared_features.cpu().data.numpy().reshape(-1,)[:10])
+                    logger.debug("shared_features {}".format( shared_features.cpu().data.numpy().reshape(-1,)[:100]))
                 currQ = self.Q(shared_features).cpu().data.numpy()
                 best_action = np.argmax(currQ)
 
