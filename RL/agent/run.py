@@ -204,6 +204,11 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
                 if agent.config["path_exp"] is not None:
                     print("saving...")
                     agent.config['start_episode'] = episode
+                    agent.config['results'] = {'num_updates': agent.config['num_updates'],
+                                               'episode': episode + 1,
+                                               'test_reward': np.mean(greedyrewlist[0][-10:]),
+                                               'train_reward': np.mean(totrewlist[-100:]),
+                                               'all_reward': totrewlist}
                     try:
                         agent.save()
                     except KeyboardInterrupt:

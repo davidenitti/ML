@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
-
+import torch.nn.init as init
+import numpy as np
 
 def identity(inp):
     return inp
@@ -41,7 +42,6 @@ class DenseNet(nn.Module):
         self.scale = scale
         self.final_act = final_act
         self.act = activ(activation)
-
     def forward(self, x):
         x = x * self.scale
         if self.batch_norm:
@@ -74,7 +74,6 @@ class ConvNet(nn.Module):
         self.act = activ(activation)
         if batch_norm:
             raise NotImplemented
-
     def forward(self, x):
         x = x * self.scale
         for c in self.conv:
@@ -82,3 +81,17 @@ class ConvNet(nn.Module):
             x = self.act(x)
         x = x.view(x.shape[0], -1)
         return x
+
+# todo remove
+# from vel/vel/rl/models/backbone/nature_cnn.py
+def reset_weights(model):
+    """ Call proper initializers for the weights """
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            # init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            init.orthogonal_(m.weight, gain=np.sqrt(2))
+            init.constant_(m.bias, 0.0)
+        elif isinstance(m, nn.Linear):
+            # init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            init.orthogonal_(m.weight, gain=np.sqrt(2))
+            init.constant_(m.bias, 0.0)

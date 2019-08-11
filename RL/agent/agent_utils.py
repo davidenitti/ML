@@ -34,9 +34,7 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
     ob1 = np.copy(ob)
     for _ in range(agent.config["past"]):
         ob1 = np.concatenate((ob1, ob), 0)
-    # agent.memoryLock.acquire()
-    # startind=agent.sizemem
-    # agent.memoryLock.release()
+
     if 'transition_net' in agent.config and agent.config['transition_net']: #fixme render and
         agent.state_list=[[],[]]
         update_state = True
@@ -145,12 +143,10 @@ def preprocess(observation, observation_space, scaled_obs, type='none'):
         o = (observation - observation_space.low) / (observation_space.high - observation_space.low) * 2. - 1.
         return o.reshape(-1, )
 
-
 def adjust_learning_rate(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     return lr
-
 
 class ReplayMemory(object):
     def __init__(self, max_size=100000, copy=False,  use_priority=False):
@@ -226,9 +222,7 @@ class ReplayMemory(object):
         self.memoryLock.release()
 
     def sizemem(self):
-        # self.memoryLock.acquire()
         l = len(self.mem)
-        # self.memoryLock.release()
         return l
 
 

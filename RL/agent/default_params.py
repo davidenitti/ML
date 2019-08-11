@@ -132,17 +132,17 @@ def get_default(nameenv):
             "normalize": False,
             "loss":"clipmse",
             "start_episode": 0,
-            "memsize": 280000,
+            "memsize": 360000,
             "randstart": 5000,
             "policy":False,
             "priority_memory": False,
             "batch_norm": False,
             "discounted_policy_grad":False,
-            "scalereward": 0.1,
+            "scalereward": 1,
             "scaleobs": 1./255.,
             "limitreward": [-1., 1.],
             'doubleQ':False,
-            "copyQ":-1,
+            "copyQ":25,
             "probupdate": 1.,
             "lambda": 0.,
             "entropy": 0.01,
@@ -152,10 +152,12 @@ def get_default(nameenv):
             "mineps": 0.1,
             "testeps": 0.05,
             "decay": 0.9996,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.00025,
-            "momentum": 0.9,
-            "eps_optim": 1e-2, # 1e-3
-            "discount": 0.99, # 0.98
+            "initial_learnrate": 0.0002,
+            "momentum": 0.95,
+            "eps_optim": 1e-3,
+            "discount": 0.99,
+            "val_clip": True,
+            "norm_clip": True,
             "ratio_policy_learnrate": 1,
             "final_learnrate": 0.0001,
             "decay_learnrate": 1,
@@ -169,7 +171,6 @@ def get_default(nameenv):
             "path_exp": None,
             "conv":True,
             "seed": -1,
-            "initializer": 'fixed',
             "sharedlayers": []}
     elif nameenv == 'Pong-v0':
         params = {

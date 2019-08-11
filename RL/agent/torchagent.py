@@ -33,12 +33,11 @@ class deepQconv(object):
         # with open(filename + "_mem.p", "wb") as input_file:
         #     pickle.dump(self.memory, input_file)
         checkpoint = {"optimizer": self.optimizer.state_dict()}
-        for m in self.model_dict:
-            checkpoint[m] = self.model_dict[m].state_dict()
+        for m in self.models:
+            checkpoint[m] = self.models[m].state_dict()
         torch.save(checkpoint, filename + ".pth")
 
     def __init__(self, observation_space, action_space, reward_range, userconfig):
-
         if userconfig["path_exp"]:
             self.log_dir = userconfig["path_exp"]
             if os.path.exists(self.log_dir):
@@ -60,8 +59,6 @@ class deepQconv(object):
                 observation_space, self))
         self.learnrate = self.config['initial_learnrate']
         self.initQnetwork()
-
-
 
     def plot(self, w, lists, reward_threshold, plt, plot=True, numplot=0, start_episode=0):
         width = 15000
@@ -110,14 +107,6 @@ class deepQconv(object):
 
                 else:
                     self.memory.memoryLock.release()
-            else:
-                pass  # fixme
-                # self.memoryLock.acquire()
-                # if self.memory.sizemem():
-                #     selec = np.random.choice(self.memory.sizemem()-1)
-                #     stateelected = self.memory[selec][0]#.copy()
-                #     # todo add summary
-                # self.memoryLock.release()
 
             if 'transition_net' in self.config and self.config['transition_net']:
                 if len(self.state_list[0]) > 0 and len(self.state_list[1]) > 0:
@@ -165,8 +154,7 @@ class deepQconv(object):
         else:
             self.scaled_obs = self.observation_space.shape
 
-    def sharednet(self, input):
-        convout = None
+    def sharednet(self, input, state_dict = None):
         if self.useConv:
             dense_conv = models.ConvNet(self.config['convlayers'], input,
                                         activation=self.config['activation'],
@@ -192,54 +180,56 @@ class deepQconv(object):
             else:
                 dense = models.ScaledIdentity(self.config['scaleobs'])
                 num_features = input[-1]
-        return convout, dense, num_features
+        if state_dict:
+            dense.load_state_dict(state_dict)
+        return dense, num_features
 
-    def Qnet(self, input):
+    def Qnet(self, input, state_dict = None):
         layers = self.config['hiddenlayers']
         Q = models.DenseNet(layers + [self.n_out], input_shape=input, scale=1, final_act=False,
                             activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+        if state_dict:
+            Q.load_state_dict(state_dict)
         return Q
 
-    def fullQNet(self, input, reuse):  # to remove
-        with tf.variable_scope('shared', reuse=reuse):
-            _, dense2 = self.sharednet(input)
-        with tf.variable_scope('Q', reuse=reuse):
-            QQ = self.Qnet(dense2)
-        return QQ
-
-    def policyNet(self, input):
+    def policyNet(self, input, state_dict = None):
         layers = self.config['hiddenlayers']
         logitpolicy = models.DenseNet(layers + [self.n_out], input_shape=input,
                                       scale=1, activation=self.config['activation'],
                                       batch_norm=self.config["batch_norm"])
+        if state_dict:
+            logitpolicy.load_state_dict(state_dict)
         return logitpolicy
 
-    def Vnet(self, input):
+    def Vnet(self, input, state_dict = None):
         layers = self.config['hiddenlayers']
         V = models.DenseNet(layers + [1], input_shape=input, final_act=False,
                             scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+        if state_dict:
+            V.load_state_dict(state_dict)
         return V
 
-    def transition_net(self, len_shared_features, actions):
+    def transition_net(self, len_shared_features, actions, state_dict = None):
         layers = [128, len_shared_features]  # fixme
         m = models.DenseNet(layers, input_shape=len_shared_features + actions, final_act=False,
                             scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+        if state_dict:
+            m.load_state_dict(state_dict)
         return m
 
     def initQnetwork(self):
-        self.model_dict = {}
+        self.models = {}
         if self.config["path_exp"] is not None and os.path.isfile(self.config["path_exp"] + ".pth"):
             checkpoint = torch.load(self.config["path_exp"] + ".pth")
         else:
-            checkpoint = None
-        learnable_parameters = []
+            checkpoint = {'shared':None,'V':None,'policy':None,"T":None, "Q":None,"optimizer":None}
+        self.learnable_parameters = []
         self.commoninit()
         use_cuda = self.config['use_cuda']
         self.device = torch.device("cuda" if use_cuda else "cpu")
         if self.isdiscrete:
             print('scaled', self.scaled_obs)
-            n_input = list(self.scaled_obs[:-1]) + [self.scaled_obs[-1] * (self.config[
-                                                                               'past'] + 1)]  # + self.observation_space.shape[0]*onehot(0,len(self.observation_space.shape))*(self.config['past'])
+            n_input = list(self.scaled_obs[:-1]) + [self.scaled_obs[-1] * (self.config['past'] + 1)]  # + self.observation_space.shape[0]*onehot(0,len(self.observation_space.shape))*(self.config['past'])
             if self.useConv == False:
                 n_input = [int(np.prod(self.scaled_obs + (1 * (self.config['past'] + 1),)))]
             else:
@@ -250,60 +240,43 @@ class deepQconv(object):
             raise NotImplemented
         print(self.observation_space, 'obs', n_input, 'action', self.n_out)
 
-        self.convout, self.shared, self.len_shared_features = self.sharednet(n_input)
-
+        self.shared, self.len_shared_features = self.sharednet(n_input, checkpoint["shared"])
+        self.shared = self.shared.to(self.device, non_blocking=True)
+        self.models["shared"] = self.shared
         if self.config['policy']:
-            self.logitpolicy = self.policyNet(self.len_shared_features)
-            self.V = self.Vnet(self.len_shared_features)
-
-            if checkpoint is not None:
-                self.logitpolicy.load_state_dict(checkpoint["policy"])
-                self.V.load_state_dict(checkpoint["V"])
-
+            self.logitpolicy = self.policyNet(self.len_shared_features, checkpoint["policy"])
+            self.V = self.Vnet(self.len_shared_features, checkpoint["V"])
             self.logitpolicy = self.logitpolicy.to(self.device,non_blocking=True)
             self.V = self.V.to(self.device,non_blocking=True)
 
-            self.model_dict["V"] = self.V
-            self.model_dict["policy"] = self.logitpolicy
+            self.models["V"] = self.V
+            self.models["policy"] = self.logitpolicy
 
-            learnable_parameters += self.logitpolicy.parameters()
-            learnable_parameters += self.V.parameters()
-
-
+            self.learnable_parameters += self.logitpolicy.parameters()
+            self.learnable_parameters += self.V.parameters()
         else:
-            self.Q = self.Qnet(self.len_shared_features)
-
+            self.Q = self.Qnet(self.len_shared_features, checkpoint["Q"]).to(self.device, non_blocking=True)
             if 'transition_net' in self.config and self.config['transition_net']:
                 self.state_list = [[], []]
                 self.avg_loss_trans = None
-                self.T = self.transition_net(self.len_shared_features, self.n_out)
-                if checkpoint is not None:
-                    self.T.load_state_dict(checkpoint["T"])
+                self.T = self.transition_net(self.len_shared_features, self.n_out, checkpoint["T"])
                 self.T = self.T.to(self.device,non_blocking=True)
-                self.model_dict["T"] = self.T
-                learnable_parameters += self.T.parameters()
+                self.models["T"] = self.T
+                self.learnable_parameters += self.T.parameters()
 
-            if checkpoint is not None:
-                self.Q.load_state_dict(checkpoint["Q"])
-
-            self.Q = self.Q.to(self.device,non_blocking=True)
-
-            self.model_dict["Q"] = self.Q
-            learnable_parameters += self.Q.parameters()
+            self.models["Q"] = self.Q
+            self.learnable_parameters += self.Q.parameters()
 
             # this used a shared net for copyQ or doubleQ
             if self.config['copyQ'] > 0 or self.config['doubleQ']:
-                self.copy_shared = copy.deepcopy(self.shared).to(self.device,non_blocking=True)
-                self.copy_Q = copy.deepcopy(self.Q).to(self.device,non_blocking=True)
+                self.copy_shared, _ = self.sharednet(n_input, checkpoint["shared"])
+                self.copy_shared = self.copy_shared.to(self.device,non_blocking=True)
+                self.copy_Q = self.Qnet(self.len_shared_features, checkpoint["Q"]).to(self.device,non_blocking=True)
 
         if self.config['normalize']:
             self.avg_target = None
-        # if len(self.config['sharedlayers']) > 0:
-        if checkpoint is not None:
-            self.shared.load_state_dict(checkpoint["shared"])
-        self.shared = self.shared.to(self.device,non_blocking=True)
-        learnable_parameters += self.shared.parameters()
-        self.model_dict["shared"] = self.shared
+
+        self.learnable_parameters += self.shared.parameters()
 
         if self.config['policy']:
             reduction='mean'
@@ -380,22 +353,26 @@ class deepQconv(object):
 
         if 'optimizer' in self.config:
             if self.config['optimizer'] == "adam":
-                self.optimizer = torch.optim.Adam(learnable_parameters, lr=self.learnrate,
+                self.optimizer = torch.optim.Adam(self.learnable_parameters, lr=self.learnrate,
                                               weight_decay=self.config['regularization'],
                                               eps=self.config['eps_optim'])
             elif self.config['optimizer'] == "sgd":
-                self.optimizer = torch.optim.SGD(learnable_parameters, lr=self.learnrate,
+                self.optimizer = torch.optim.SGD(self.learnable_parameters, lr=self.learnrate,
                                                  weight_decay=self.config['regularization'],
                                                  momentum=self.config['momentum'])
             else:
-                raise NotImplementedError
+                self.optimizer = torch.optim.RMSprop(self.learnable_parameters, lr=self.learnrate,
+                                                     momentum=self.config['momentum'],
+                                                     weight_decay=self.config['regularization'],
+                                                     alpha=0.95,
+                                                     eps=self.config['eps_optim'])
         else:
-            self.optimizer = torch.optim.RMSprop(learnable_parameters, lr=self.learnrate,
+            self.optimizer = torch.optim.RMSprop(self.learnable_parameters, lr=self.learnrate,
                                                  momentum=self.config['momentum'],
                                                  weight_decay=self.config['regularization'],
                                                  alpha=0.95,
                                                  eps=self.config['eps_optim'])
-        if checkpoint is not None:
+        if checkpoint["optimizer"] is not None:
            self.optimizer.load_state_dict(checkpoint["optimizer"])
 
         if 'num_updates' not in self.config:
@@ -406,10 +383,10 @@ class deepQconv(object):
         print((self.config['memsize'],) + tuple(n_input))
 
     def learn(self, force=False, print_iteration=False):
-        for m in self.model_dict:
-            self.model_dict[m].train()
+        for m in self.models:
+            self.models[m].train()
         if self.config['copyQ'] > 0 and self.config['num_updates'] % self.config['copyQ'] == 0:
-            #print('copying Q')
+            logger.debug('copying Q')
             self.copy_shared.load_state_dict(self.shared.state_dict())
             self.copy_Q.load_state_dict(self.Q.state_dict())
 
@@ -556,7 +533,12 @@ class deepQconv(object):
                             print("dist", torch.mean((pred_next_features_reward - target_tr) ** 2).sqrt().data.item())
                         loss += self.config['transition_weight'] * loss_trans
 
+
                 loss.backward()
+                if 'norm_clip' in self.config and self.config['norm_clip']:
+                    torch.nn.utils.clip_grad_norm_(self.learnable_parameters, 0.5)
+                if 'val_clip' in self.config and self.config['val_clip']:
+                    torch.nn.utils.clip_grad_value_(self.learnable_parameters, 1)
                 self.optimizer.step()
 
                 # if checkcost:
@@ -586,8 +568,8 @@ class deepQconv(object):
         fig.canvas.flush_events()
 
     def learnpolicy(self, startind=None, endind=None):
-        for m in self.model_dict:
-            self.model_dict[m].train()
+        for m in self.models:
+            self.models[m].train()
         self.memory.memoryLock.acquire()
         # todo fix indexing with new indexes
         if startind is None or endind is None:
@@ -705,20 +687,14 @@ class deepQconv(object):
             loss.backward()
             self.optimizer.step()
 
-            # self.sess.run(self.optimizer_policy, feed_dict={
-            #     self.x: allstate,
-            #     self.yp: targetp.reshape((-1, )),
-            #     self.y: targetV.reshape((-1, 1)),
-            #     self.curraction: allactionsparse})
-            #
             return True
         else:
             self.memory.memoryLock.release()
             return False
 
     def maxq(self, observation):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         if self.isdiscrete:
             if observation.ndim == 1:
                 observation = observation.reshape(1, -1)
@@ -734,6 +710,7 @@ class deepQconv(object):
                 return np.max(currQ).reshape(1, )
 
     def maxqbatch(self, observation):
+        raise NotImplementedError
         if self.isdiscrete:
             if self.copyQalone:
                 return np.max(self.sess.run(self.Q2, feed_dict={self.x: observation}), 1)
@@ -741,6 +718,7 @@ class deepQconv(object):
                 return np.max(self.sess.run(self.Q, feed_dict={self.x: observation}), 1)
 
     def doublemaxqbatch(self, observation, flag):
+        raise NotImplementedError
         # print observation
         if self.isdiscrete:
             if flag:
@@ -753,8 +731,8 @@ class deepQconv(object):
                 return Q2[range(Q2.shape[0]), np.argmax(self.sess.run(self.Q, feed_dict={self.x: observation}), 1)]
 
     def argmaxq(self, observation):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         if self.isdiscrete:
             if observation.ndim == 1:
                 observation = observation.reshape(1, -1)
@@ -775,16 +753,17 @@ class deepQconv(object):
                 # return np.argmax(self.sess.run(self.Q, feed_dict={self.x: observation}))
 
     def evalQ(self, observation):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        # todo add with torch.no_grad(): at every eval
+        for m in self.models:
+            self.models[m].eval()
         assert observation.ndim > 1
         var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
-        currQ = self.Q(self.shared(var_obs)).cpu().data.numpy()
+        currQ = self.Q(self.shared(var_obs)).cpu().data.numpy() #fixme is this necessary?
         return currQ
 
     def eval_policy(self, observation, numpy, logit=False):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         if self.isdiscrete:
             if observation.ndim == 1:
                 observation = observation.reshape(1, -1)
@@ -800,8 +779,8 @@ class deepQconv(object):
             return prob
 
     def evalV(self, observation, numpy):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         assert observation.ndim > 1
         input = Variable(torch.from_numpy(observation)).float()
         input = input.to(self.device,non_blocking=True)
@@ -812,8 +791,8 @@ class deepQconv(object):
             return v
 
     def softmaxq(self, observation):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         if self.isdiscrete:
             if observation.ndim == 1:
                 observation = observation.reshape(1, -1)
@@ -826,8 +805,8 @@ class deepQconv(object):
             exit(0)
 
     def act(self, observation, episode=None, update_state=False):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         eps = self.epsilon(episode)
 
         # epsilon greedy.
@@ -856,8 +835,8 @@ class deepQconv(object):
         return action
 
     def actpolicy(self, observation, episode=None):
-        for m in self.model_dict:
-            self.model_dict[m].eval()
+        for m in self.models:
+            self.models[m].eval()
         prob = self.eval_policy(observation, numpy=True)[0]
         if episode is None or episode < 0:
             action = np.argmax(prob)
