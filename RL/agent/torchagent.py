@@ -13,7 +13,7 @@ from . import common
 from . import models
 from . import buffers
 
-from .agent_utils import ReplayMemory, onehot, vis
+from .agent_utils import onehot, vis
 import json
 import pickle
 
@@ -84,8 +84,13 @@ class deepQconv(object):
 
             plt.plot(range(start_episode, start_episode + len(totrewlist)), totrewlist, color='red')
             # plt.plot(range(len(total_rew_discountlist)), [ddd-total_rew_discountlist[0]+totrewlist[0] for ddd in total_rew_discountlist], color='green')
-            plt.plot(greedyrewlist[1], totrewavglist, color='blue')
+            plt.plot(greedyrewlist[1], totrewavglist, color='cyan')
+
             plt.scatter(greedyrewlist[1], greedyrewlist[0], color='black')
+
+            plt.plot([start_episode + max(0, len(totrewlist) - 1 - 20), start_episode + len(totrewlist) - 1],
+                     [np.mean(np.array(greedyrewlist[0][-20:])), np.mean(np.array(greedyrewlist[0][-20:]))], color='blue')
+
             plt.plot([start_episode + max(0, len(totrewlist) - 1 - 100), start_episode + len(totrewlist) - 1],
                      [np.mean(np.array(totrewlist[-100:])), np.mean(np.array(totrewlist[-100:]))], color='black')
             if self.config["path_exp"]:
@@ -329,25 +334,15 @@ class deepQconv(object):
 
                 tf.summary.histogram('Q2', self.Q2)
                 # assert self.singleQ2.get_shape() == self.y.get_shape()
-            # if self.config['clip'] > 0 and "cliptype" in self.config and self.config['cliptype'] == 'deltaclip':
-            #     self.errorlist = clipdelta(delta, self.config['clip'])
-            #     print(self.errorlist.get_shape())
-            # else:
-            #     pass  # self.errorlist = 0.5 * delta ** 2  # tf.minimum(0.5 * delta ** 2, tf.abs(delta))  # (self.singleQ - self.y) ** 2
-            # print('errorlist', self.errorlist.get_shape())
+
             if self.config['doubleQ']:
                 # fixme to remove (old tf implementation)
                 if self.config['clip'] > 0 and "cliptype" in self.config and self.config['cliptype'] == 'deltaclip':
                     self.errorlist2 = clipdelta(delta2, self.config['clip'])
                 else:
                     self.errorlist2 = 0.5 * delta2 ** 2
-            # self.cost = tf.reduce_mean(self.errorlist)
 
-            # regul=tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,tf.get_variable_scope().name)
-            # printRegularization()
-            # if regul!=[]:
-            #    self.cost+= tf.add_n(regul)
-            # tf.summary.histogram('cost', self.cost)
+
             if self.config['doubleQ']:
                 # fixme to remove (old tf implementation)
                 if regul != []:
@@ -399,7 +394,7 @@ class deepQconv(object):
                                                self.action_space, self.config['past'])
         print((self.config['memsize'],) + tuple(n_input))
 
-    def learn(self, force=False, print_iteration=False):
+    def learn(self, force=False):
         self.update_learning_rate()
         for m in self.models:
             self.models[m].train()
@@ -450,7 +445,7 @@ class deepQconv(object):
                             gamma = gamma * self.config['discount']
                             if n + nextstate * 2 >= self.memory.sizemem() or not (offset + nextstate < limitd) or \
                                     self.memory[n][3] == 0:
-                                maxsteps_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0]) * \
+                                maxsteps_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0][None,...]) * \
                                                          self.memory[n][3]
                                 nextstate = None
                             else:
@@ -562,15 +557,13 @@ class deepQconv(object):
 
         return self.config['num_updates']
 
-    def plot_state(self, state_list):  # fixme use plt instead of plt0
-        fig = plt0.figure(2)
+    def plot_state(self, plt, state_list):  # fixme use plt instead of plt0
+        fig = plt.figure(2)
         fig.canvas.set_window_title(str(self.config["path_exp"]) + " " + str(self.config))
 
-        plt0.clf()
-        plt0.plot(state_list[0][0], state_list[0][1], color='black')
-        plt0.plot(state_list[1][0], state_list[1][1], color='red')
-        # plt0.draw()
-        # plt0.pause(0.0001)
+        plt.clf()
+        plt.plot(state_list[0][0], state_list[0][1], color='black')
+        plt.plot(state_list[1][0], state_list[1][1], color='red')
         fig.canvas.flush_events()
 
     def learnpolicy(self, startind=None, endind=None):
@@ -584,8 +577,8 @@ class deepQconv(object):
             endind = self.memory.sizemem()
         n = endind - startind
         if n >= 1:  # self.sizemem >= self.config['batch_size']:
-            allstate = np.zeros((n,) + self.memory[startind][0].shape)
-            listdiscounts = np.zeros((n, 1))
+            allstate = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
+            listdiscounts = np.zeros((n, 1), dtype=np.float32)
 
             nextstates = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
             currew = np.zeros((n, 1), dtype=np.float32)
@@ -642,13 +635,13 @@ class deepQconv(object):
                     allstate = allstate[1:]
                     allactions = allactions[1:]
 
-                if np.random.random() < 0.2:
-                    print(notdonevec[0, 0])
+                if np.random.random() < 0.1:
+                    #print(notdonevec[0, 0])
                     print('currew', (currew).reshape(-1, )[0:5], (currew).reshape(-1, )[-5:])
                     print('Gtv', (Gtv).reshape(-1, )[0:5], (Gtv).reshape(-1, )[-5:])
                     print('targetV', (targetV).reshape(-1, )[0:5], (targetV).reshape(-1, )[-5:])
                     print('Vstate', Vallstate.reshape(-1, )[0:5], Vallstate.reshape(-1, )[-5:])
-                    print((notdonevec).reshape(-1, )[0:5], (notdonevec).reshape(-1, )[-5:])
+                    print("notdonevec",(notdonevec).reshape(-1, )[0:5], (notdonevec).reshape(-1, )[-5:])
 
                 targetV = targetV * (1 - self.config['lambda']) + Gtv * self.config['lambda']
                 # print(Gtv,targetV)
@@ -656,7 +649,7 @@ class deepQconv(object):
                 if self.config['discounted_policy_grad'] == False:
                     listdiscounts = 1.
                 else:
-                    listdiscounts = Variable(torch.from_numpy(listdiscounts).float()).to(self.device, non_blocking=True)
+                    listdiscounts = torch.from_numpy(listdiscounts).to(self.device, non_blocking=True)
                 targetp = 1 * listdiscounts * (targetV - Vallstate)
                 targetp = (targetp - targetp.mean()) / (targetp.std() + 0.000001)
                 targetp = targetp.detach()
@@ -668,7 +661,11 @@ class deepQconv(object):
 
             self.optimizer.zero_grad()
             logit = self.eval_policy(allstate, numpy=False, logit=True)
-            pr, logp = torch.nn.functional.softmax(logit), torch.nn.functional.log_softmax(logit)
+            pr, logp = torch.nn.functional.softmax(logit,dim=1), torch.nn.functional.log_softmax(logit,dim=1)
+
+            if np.random.random() < 0.001:
+                print('prob', pr,"logit",logit)
+
             entropy = self.config['entropy'] * torch.mean(-torch.sum(pr * logp, 1))
             logpolicy = targetp.view(-1, ) * self.policy_criterion(logit, allactions).view(-1, )
             errorpolicy = torch.mean(logpolicy) - entropy
@@ -699,19 +696,17 @@ class deepQconv(object):
     def maxq(self, observation):
         for m in self.models:
             self.models[m].eval()
-        if self.isdiscrete:
-            if observation.ndim == 1:
-                observation = observation.reshape(1, -1)
-            else:
-                observation = observation.reshape(tuple([1] + list(observation.shape)))
-            if self.copyQalone:
-                var_obs = torch.from_numpy(observation).float().to(self.device, non_blocking=True)
-                currQ = self.copy_Q(self.copy_shared(var_obs)).cpu().data.numpy()
-                return np.max(currQ).reshape(1, )
-            else:
-                var_obs = torch.from_numpy(observation).float().to(self.device, non_blocking=True)
-                currQ = self.Q(self.shared(var_obs)).cpu().data.numpy()
-                return np.max(currQ).reshape(1, )
+        assert observation.ndim > 1
+        assert self.isdiscrete
+
+        if self.copyQalone:
+            var_obs = torch.from_numpy(observation).float().to(self.device, non_blocking=True)
+            currQ = self.copy_Q(self.copy_shared(var_obs)).cpu().data.numpy()
+            return np.max(currQ).reshape(1, )
+        else:
+            var_obs = torch.from_numpy(observation).float().to(self.device, non_blocking=True)
+            currQ = self.Q(self.shared(var_obs)).cpu().data.numpy()
+            return np.max(currQ).reshape(1, )
 
     def maxqbatch(self, observation):
         raise NotImplementedError
@@ -771,12 +766,16 @@ class deepQconv(object):
         if self.isdiscrete:
             if observation.ndim == 1:
                 observation = observation.reshape(1, -1)
-        input = Variable(torch.from_numpy(observation)).float()
+        input = torch.from_numpy(observation).float()
         input = input.to(self.device, non_blocking=True)
         if logit:
             prob = self.logitpolicy(self.shared(input))
         else:
-            prob = torch.nn.functional.softmax(self.logitpolicy(self.shared(input)))
+            lg = self.logitpolicy(self.shared(input))
+            if torch.isnan(lg).any():
+                print("nan",lg,"\n",input,"\n",self.shared(input))
+            assert torch.isnan(lg).any()==False
+            prob = torch.nn.functional.softmax(lg)
         if numpy:
             return prob.cpu().data.numpy()
         else:
@@ -842,11 +841,12 @@ class deepQconv(object):
     def actpolicy(self, observation, episode=None):
         for m in self.models:
             self.models[m].eval()
-        prob = self.eval_policy(observation, numpy=True)[0]
+        prob = self.eval_policy(observation[None,...], numpy=True)[0]
         if episode is None or episode < 0:
             action = np.argmax(prob)
         else:
             action = np.random.choice(self.n_out, p=prob)  # (prob[0]+0.04)/np.sum(prob[0]+0.04))
+        assert np.isnan(prob).any() == False
         if np.random.random() < 0.001:
             print('prob', prob)
         return action

@@ -1,7 +1,6 @@
 import gym
 import numpy as np
 import random
-import torch
 class ReplayMemory(object):
     def __init__(self, max_size, observation_dims, observation_dtype, action_space: gym.Space, history: int, use_priority=False):
         if len(list(observation_dims))==3:
@@ -36,7 +35,7 @@ class ReplayMemory(object):
         self.episodes = []
 
     def __getitem__(self, item):  # item has to be from 0 to len(mem)-1
-        assert (item < self.current_size and item>=self.history) # change to >=0 for policy #TODO
+        assert (item < self.current_size and item>=0) # change to >=0 for policy #TODO
         if self.history>0:
             if item<self.history:
                 assert len(self.info_mem)<=self.last_ind+1 # to check fixme (maybe used only in policy learning

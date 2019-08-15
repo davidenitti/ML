@@ -93,9 +93,7 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
         elif ((t + 1) % agent.config['batch_size'] == 0 or done) and agent.config['policy']:
             # raise NotImplemented("startind not good for circular buffer")
             agent.learnpolicy()
-            agent.memory.memoryLock.acquire()
             agent.memory.empty()
-            agent.memory.memoryLock.release()
 
         total_rew_discount += limitreward * (discount ** t) #using limited reward
         total_rew += reward
@@ -144,83 +142,83 @@ def preprocess(observation, observation_space, scaled_obs, type='none'):
         return o.reshape(-1, )
 
 
-
-class ReplayMemory(object):
-    def __init__(self, max_size=100000, copy=False,  use_priority=False):
-        self.mem2 = None
-        self.mem = []
-        self.max_size = max_size
-        self.memoryLock = threading.Lock()
-        self.last_ind = -1
-        self.start_ind = -1
-        self.copy = copy
-        self.use_priority = use_priority
-        if self.use_priority:
-            self.max_priority = 0.0000001
-            self.priority = np.zeros(max_size) + self.max_priority
-
-
-    def empty(self):
-        self.mem = []
-        self.mem2 = None
-        self.last_ind = -1
-        self.start_ind = -1
-
-    def __getitem__(self, item):  # item has to be from 0 to len(mem)-1
-        assert (item < len(self.mem))
-        idx = (self.start_ind + item) % self.max_size
-        if self.copy:
-            self.memoryLock.acquire()
-            val = [self.mem2[idx].deepcopy()]+self.mem[idx].deepcopy()
-            self.memoryLock.release()
-        else:
-            val = [self.mem2[idx]]+self.mem[idx]
-        return val
-
-    def set_priority(self, idx, vals):  # item has to be from 0 to len(mem)-1
-        assert (idx < len(self.mem)).all()
-        idx_new = (self.start_ind + idx) % self.max_size
-        self.priority[idx_new] = vals
-
-    def get_priorities(self):
-        assert self.start_ind>=0 and self.last_ind>=0
-        if self.start_ind<=self.last_ind:
-            return self.priority[self.start_ind:self.last_ind] #last element is not returned! (because there is no next state)
-        else:
-            return np.concatenate((self.priority[self.start_ind:],self.priority[:self.last_ind]))
-
-    def update_max(self):
-        if self.sizemem()>2:
-            pr = self.get_priorities()
-            self.max_priority = np.minimum(pr.max(),pr.mean()+4*pr.std())
-
-    def add(self, example):
-        self.memoryLock.acquire()
-        if self.use_priority and random.random()<0.05:
-            self.update_max()
-            if random.random()<0.1:
-                print("max priority",self.max_priority,self.get_priorities().mean())
-        self.last_ind += 1
-        self.last_ind = self.last_ind % self.max_size
-        if len(self.mem) >= self.max_size:
-            self.mem[self.last_ind] = example[1:]
-            self.mem2[self.last_ind] = example[0]
-            if self.use_priority:
-                self.priority[self.last_ind] = self.max_priority
-            self.start_ind = (self.last_ind + 1) % self.max_size  # circular buffer
-        else:
-            self.mem.append(example[1:])
-            if self.mem2 is None:
-                self.mem2 = np.zeros([self.max_size]+list(example[0].shape),dtype=example[0].dtype)
-            self.mem2[self.last_ind] = example[0]
-            if self.use_priority:
-                self.priority[self.sizemem()-1] = self.max_priority
-            self.start_ind = 0
-        self.memoryLock.release()
-
-    def sizemem(self):
-        l = len(self.mem)
-        return l
+#
+# class ReplayMemory(object):
+#     def __init__(self, max_size=100000, copy=False,  use_priority=False):
+#         self.mem2 = None
+#         self.mem = []
+#         self.max_size = max_size
+#         self.memoryLock = threading.Lock()
+#         self.last_ind = -1
+#         self.start_ind = -1
+#         self.copy = copy
+#         self.use_priority = use_priority
+#         if self.use_priority:
+#             self.max_priority = 0.0000001
+#             self.priority = np.zeros(max_size) + self.max_priority
+#
+#
+#     def empty(self):
+#         self.mem = []
+#         self.mem2 = None
+#         self.last_ind = -1
+#         self.start_ind = -1
+#
+#     def __getitem__(self, item):  # item has to be from 0 to len(mem)-1
+#         assert (item < len(self.mem))
+#         idx = (self.start_ind + item) % self.max_size
+#         if self.copy:
+#             self.memoryLock.acquire()
+#             val = [self.mem2[idx].deepcopy()]+self.mem[idx].deepcopy()
+#             self.memoryLock.release()
+#         else:
+#             val = [self.mem2[idx]]+self.mem[idx]
+#         return val
+#
+#     def set_priority(self, idx, vals):  # item has to be from 0 to len(mem)-1
+#         assert (idx < len(self.mem)).all()
+#         idx_new = (self.start_ind + idx) % self.max_size
+#         self.priority[idx_new] = vals
+#
+#     def get_priorities(self):
+#         assert self.start_ind>=0 and self.last_ind>=0
+#         if self.start_ind<=self.last_ind:
+#             return self.priority[self.start_ind:self.last_ind] #last element is not returned! (because there is no next state)
+#         else:
+#             return np.concatenate((self.priority[self.start_ind:],self.priority[:self.last_ind]))
+#
+#     def update_max(self):
+#         if self.sizemem()>2:
+#             pr = self.get_priorities()
+#             self.max_priority = np.minimum(pr.max(),pr.mean()+4*pr.std())
+#
+#     def add(self, example):
+#         self.memoryLock.acquire()
+#         if self.use_priority and random.random()<0.05:
+#             self.update_max()
+#             if random.random()<0.1:
+#                 print("max priority",self.max_priority,self.get_priorities().mean())
+#         self.last_ind += 1
+#         self.last_ind = self.last_ind % self.max_size
+#         if len(self.mem) >= self.max_size:
+#             self.mem[self.last_ind] = example[1:]
+#             self.mem2[self.last_ind] = example[0]
+#             if self.use_priority:
+#                 self.priority[self.last_ind] = self.max_priority
+#             self.start_ind = (self.last_ind + 1) % self.max_size  # circular buffer
+#         else:
+#             self.mem.append(example[1:])
+#             if self.mem2 is None:
+#                 self.mem2 = np.zeros([self.max_size]+list(example[0].shape),dtype=example[0].dtype)
+#             self.mem2[self.last_ind] = example[0]
+#             if self.use_priority:
+#                 self.priority[self.sizemem()-1] = self.max_priority
+#             self.start_ind = 0
+#         self.memoryLock.release()
+#
+#     def sizemem(self):
+#         l = len(self.mem)
+#         return l
 
 
 def vis(pl, w, image, images1, images2):

@@ -64,20 +64,27 @@ class ConvNet(nn.Module):
     def __init__(self, convlayers, input_shape, scale=1.0, activation='relu', batch_norm=False):
         super(ConvNet, self).__init__()
         self.conv = []
+        self.bn = []
+        self.batch_norm = batch_norm
         input_channel = input_shape[0]
         for i in range(len(convlayers)):
             self.conv.append(nn.Conv2d(input_channel, convlayers[i][3],
                                        kernel_size=convlayers[i][0], stride=convlayers[i][2]))
+            if batch_norm:
+                self.bn.append(nn.BatchNorm2d(convlayers[i][3]))
             input_channel = convlayers[i][3]
         self.conv = nn.ModuleList(self.conv)
         self.scale = scale
         self.act = activ(activation)
         if batch_norm:
-            raise NotImplemented
+            self.bn = nn.ModuleList(self.bn)
+
     def forward(self, x):
         x = x * self.scale
-        for c in self.conv:
+        for i,c in enumerate(self.conv):
             x = c(x)
+            if self.batch_norm:
+                x = self.bn[i](x)
             x = self.act(x)
         x = x.view(x.shape[0], -1)
         return x
