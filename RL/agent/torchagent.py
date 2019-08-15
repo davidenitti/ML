@@ -1,4 +1,4 @@
-from numba import jit,jitclass
+from numba import jit, jitclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,6 +11,8 @@ from torch.autograd import Variable
 import logging
 from . import common
 from . import models
+from . import buffers
+
 from .agent_utils import ReplayMemory, onehot, vis
 import json
 import pickle
@@ -18,11 +20,13 @@ import pickle
 import copy
 
 import matplotlib.pyplot as plt0
+
 try:
     import IPython.display  # for ipython/notebook compatibility
 except:
     plt0.ion()
 logger = logging.getLogger(__name__)
+
 
 class deepQconv(object):
     def save(self, filename=None):
@@ -30,8 +34,10 @@ class deepQconv(object):
             filename = self.config["path_exp"]
         with open(filename + ".json", "w") as input_file:
             json.dump(self.config, input_file, indent=3)
-        # with open(filename + "_mem.p", "wb") as input_file:
-        #     pickle.dump(self.memory, input_file)
+        if self.config['save_mem']:
+            logger.info('saving memory')
+            with open(filename + "_mem.p", "wb") as input_file:
+                pickle.dump(self.memory, input_file)
         checkpoint = {"optimizer": self.optimizer.state_dict()}
         for m in self.models:
             checkpoint[m] = self.models[m].state_dict()
@@ -87,26 +93,21 @@ class deepQconv(object):
 
             ymin, ymax = plt.gca().get_ylim()
             xmin, xmax = plt.gca().get_xlim()
-            plt.text(xmin,ymax, str(self.config), ha='left', wrap=True, fontsize=18)
+            plt.text(xmin, ymax, str(self.config), ha='left', wrap=True, fontsize=18)
             if self.config['conv'] and False:  # fixme
                 if plot:
                     fig = plt.figure(2)
                     fig.canvas.set_window_title(str(self.config["path_exp"]) + " " + str(self.config))
 
-                self.memory.memoryLock.acquire()
-                if self.memory.sizemem() > 1:
-                    selec = np.random.choice(self.memory.sizemem() - 1)
+                if self.memory.sizemem() > 1 + self.config['past']:
+                    selec = self.config['past'] + np.random.choice(self.memory.sizemem() - 1 - self.config['past'])
                     imageselected = self.memory[selec][0].copy()
-                    self.memory.memoryLock.release()
                     filtered1 = np.zeros((1, 1, 10, 10))
                     filtered2 = np.zeros((1, 1, 10, 10))
                     vis(plt, w, imageselected, filtered1[0], filtered2[0])
 
                     if self.config["path_exp"] and plot == False:
                         plt.savefig(self.config["path_exp"] + '_features' + '.png', dpi=300)
-
-                else:
-                    self.memory.memoryLock.release()
 
             if 'transition_net' in self.config and self.config['transition_net']:
                 if len(self.state_list[0]) > 0 and len(self.state_list[1]) > 0:
@@ -119,14 +120,14 @@ class deepQconv(object):
                 plt.draw()
                 plt.pause(.001)
                 fig.canvas.flush_events()
-        time.sleep(2.0)
+        time.sleep(0.01)
 
     def scaleobs(self, obs):
         if np.isinf(self.observation_space.low).any() or np.isinf(self.observation_space.high).any():
             return obs
         else:
             o = (obs - self.observation_space.low) / (
-                self.observation_space.high - self.observation_space.low) * 2. - 1.
+                    self.observation_space.high - self.observation_space.low) * 2. - 1.
             return o
 
     def epsilon(self, episode=None):
@@ -135,7 +136,9 @@ class deepQconv(object):
         elif episode == -1:
             return self.config['testeps']
         else:
-            return max(self.config['mineps'], self.config['eps'] * self.config['decay'] ** episode)
+            return max(self.config['mineps'],
+                       self.config['eps'] - (self.config['eps'] - self.config['mineps']) * self.config['linear_decay'] *
+                       self.config['num_updates'])
 
     def getlearnrate(self):
         return self.learnrate
@@ -154,7 +157,7 @@ class deepQconv(object):
         else:
             self.scaled_obs = self.observation_space.shape
 
-    def sharednet(self, input, state_dict = None):
+    def sharednet(self, input, state_dict=None):
         if self.useConv:
             dense_conv = models.ConvNet(self.config['convlayers'], input,
                                         activation=self.config['activation'],
@@ -182,54 +185,63 @@ class deepQconv(object):
                 num_features = input[-1]
         if state_dict:
             dense.load_state_dict(state_dict)
+            logger.info('sharednet loaded')
         return dense, num_features
 
-    def Qnet(self, input, state_dict = None):
+    def Qnet(self, input, state_dict=None):
         layers = self.config['hiddenlayers']
         Q = models.DenseNet(layers + [self.n_out], input_shape=input, scale=1, final_act=False,
                             activation=self.config['activation'], batch_norm=self.config["batch_norm"])
         if state_dict:
             Q.load_state_dict(state_dict)
+            logger.info('Q loaded')
         return Q
 
-    def policyNet(self, input, state_dict = None):
+    def policyNet(self, input, state_dict=None):
         layers = self.config['hiddenlayers']
         logitpolicy = models.DenseNet(layers + [self.n_out], input_shape=input,
                                       scale=1, activation=self.config['activation'],
                                       batch_norm=self.config["batch_norm"])
         if state_dict:
             logitpolicy.load_state_dict(state_dict)
+            logger.info('policyNet loaded')
         return logitpolicy
 
-    def Vnet(self, input, state_dict = None):
+    def Vnet(self, input, state_dict=None):
         layers = self.config['hiddenlayers']
         V = models.DenseNet(layers + [1], input_shape=input, final_act=False,
                             scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"])
         if state_dict:
             V.load_state_dict(state_dict)
+            logger.info('V loaded')
         return V
 
-    def transition_net(self, len_shared_features, actions, state_dict = None):
+    def transition_net(self, len_shared_features, actions, state_dict=None):
         layers = [128, len_shared_features]  # fixme
         m = models.DenseNet(layers, input_shape=len_shared_features + actions, final_act=False,
                             scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"])
         if state_dict:
             m.load_state_dict(state_dict)
+            logger.info('Tr loaded')
         return m
 
     def initQnetwork(self):
         self.models = {}
         if self.config["path_exp"] is not None and os.path.isfile(self.config["path_exp"] + ".pth"):
-            checkpoint = torch.load(self.config["path_exp"] + ".pth")
+            device = None if self.config['use_cuda'] else 'cpu'
+            checkpoint = torch.load(self.config["path_exp"] + ".pth", map_location=device)
+            logger.info('checkpoint loaded')
         else:
-            checkpoint = {'shared':None,'V':None,'policy':None,"T":None, "Q":None,"optimizer":None}
+            logger.info('no checkpoint loaded')
+            checkpoint = {'shared': None, 'V': None, 'policy': None, "T": None, "Q": None, "optimizer": None}
         self.learnable_parameters = []
         self.commoninit()
         use_cuda = self.config['use_cuda']
         self.device = torch.device("cuda" if use_cuda else "cpu")
         if self.isdiscrete:
             print('scaled', self.scaled_obs)
-            n_input = list(self.scaled_obs[:-1]) + [self.scaled_obs[-1] * (self.config['past'] + 1)]  # + self.observation_space.shape[0]*onehot(0,len(self.observation_space.shape))*(self.config['past'])
+            n_input = list(self.scaled_obs[:-1]) + [self.scaled_obs[-1] * (self.config[
+                                                                               'past'] + 1)]  # + self.observation_space.shape[0]*onehot(0,len(self.observation_space.shape))*(self.config['past'])
             if self.useConv == False:
                 n_input = [int(np.prod(self.scaled_obs + (1 * (self.config['past'] + 1),)))]
             else:
@@ -246,8 +258,8 @@ class deepQconv(object):
         if self.config['policy']:
             self.logitpolicy = self.policyNet(self.len_shared_features, checkpoint["policy"])
             self.V = self.Vnet(self.len_shared_features, checkpoint["V"])
-            self.logitpolicy = self.logitpolicy.to(self.device,non_blocking=True)
-            self.V = self.V.to(self.device,non_blocking=True)
+            self.logitpolicy = self.logitpolicy.to(self.device, non_blocking=True)
+            self.V = self.V.to(self.device, non_blocking=True)
 
             self.models["V"] = self.V
             self.models["policy"] = self.logitpolicy
@@ -260,7 +272,7 @@ class deepQconv(object):
                 self.state_list = [[], []]
                 self.avg_loss_trans = None
                 self.T = self.transition_net(self.len_shared_features, self.n_out, checkpoint["T"])
-                self.T = self.T.to(self.device,non_blocking=True)
+                self.T = self.T.to(self.device, non_blocking=True)
                 self.models["T"] = self.T
                 self.learnable_parameters += self.T.parameters()
 
@@ -270,8 +282,8 @@ class deepQconv(object):
             # this used a shared net for copyQ or doubleQ
             if self.config['copyQ'] > 0 or self.config['doubleQ']:
                 self.copy_shared, _ = self.sharednet(n_input, checkpoint["shared"])
-                self.copy_shared = self.copy_shared.to(self.device,non_blocking=True)
-                self.copy_Q = self.Qnet(self.len_shared_features, checkpoint["Q"]).to(self.device,non_blocking=True)
+                self.copy_shared = self.copy_shared.to(self.device, non_blocking=True)
+                self.copy_Q = self.Qnet(self.len_shared_features, checkpoint["Q"]).to(self.device, non_blocking=True)
 
         if self.config['normalize']:
             self.avg_target = None
@@ -279,10 +291,10 @@ class deepQconv(object):
         self.learnable_parameters += self.shared.parameters()
 
         if self.config['policy']:
-            reduction='mean'
+            reduction = 'mean'
             self.policy_criterion = nn.CrossEntropyLoss(reduction='none')
         else:
-            reduction='none'
+            reduction = 'none'
         if self.config['loss'].lower() == 'mse':
             self.criterion = nn.MSELoss(reduction=reduction)
         elif self.config['loss'].lower() == 'clipmse':
@@ -290,11 +302,10 @@ class deepQconv(object):
         else:
             raise NotImplemented
 
-
         if self.config['policy'] == False:
             if self.config['doubleQ']:
                 raise NotImplementedError
-                #fixme to remove (old tf implementation)
+                # fixme to remove (old tf implementation)
                 self.singleQ2 = tf.reduce_sum(self.curraction * self.Q2,
                                               reduction_indices=1)  # tf.reduce_sum(input_tensor, reduction_indices, keep_dims, name)#tf.slice(self.Q, [0,self.curraction],[-1,1])  #self.Q[:,self.out]
                 with tf.variable_scope('copyQ', reuse=True):
@@ -307,14 +318,14 @@ class deepQconv(object):
                 maxQnext2 = tf.gather_nd(self.Q2next, cat_idx1)
                 if self.config['episodic']:
                     delta2 = self.singleQ2 - (
-                        self.reward + self.config["discount"] * tf.stop_gradient(maxQnext1) * self.notdone)
+                            self.reward + self.config["discount"] * tf.stop_gradient(maxQnext1) * self.notdone)
                     delta = self.singleQ - (
-                        self.reward + self.config["discount"] * tf.stop_gradient(maxQnext2) * self.notdone)
+                            self.reward + self.config["discount"] * tf.stop_gradient(maxQnext2) * self.notdone)
                 else:
                     delta2 = self.singleQ2 - (
-                        self.reward + self.config["discount"] * tf.stop_gradient(maxQnext1))
+                            self.reward + self.config["discount"] * tf.stop_gradient(maxQnext1))
                     delta = self.singleQ - (
-                        self.reward + self.config["discount"] * tf.stop_gradient(maxQnext2))
+                            self.reward + self.config["discount"] * tf.stop_gradient(maxQnext2))
 
                 tf.summary.histogram('Q2', self.Q2)
                 # assert self.singleQ2.get_shape() == self.y.get_shape()
@@ -354,8 +365,8 @@ class deepQconv(object):
         if 'optimizer' in self.config:
             if self.config['optimizer'] == "adam":
                 self.optimizer = torch.optim.Adam(self.learnable_parameters, lr=self.learnrate,
-                                              weight_decay=self.config['regularization'],
-                                              eps=self.config['eps_optim'])
+                                                  weight_decay=self.config['regularization'],
+                                                  eps=self.config['eps_optim'])
             elif self.config['optimizer'] == "sgd":
                 self.optimizer = torch.optim.SGD(self.learnable_parameters, lr=self.learnrate,
                                                  weight_decay=self.config['regularization'],
@@ -373,16 +384,23 @@ class deepQconv(object):
                                                  alpha=0.95,
                                                  eps=self.config['eps_optim'])
         if checkpoint["optimizer"] is not None:
-           self.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
 
         if 'num_updates' not in self.config:
             self.config['num_updates'] = 0
 
-        self.memory = ReplayMemory(self.config['memsize'],use_priority=self.config['priority_memory'])
-
+        if self.config["path_exp"] is not None and os.path.exists(self.config["path_exp"] + "_mem.p"):
+            with open(self.config["path_exp"] + "_mem.p", "rb") as input_file:
+                self.memory = pickle.load(input_file)
+                logger.info('memory loaded')
+        else:
+            # self.memory = ReplayMemory(self.config['memsize'],use_priority=self.config['priority_memory'])
+            self.memory = buffers.ReplayMemory(self.config['memsize'], self.scaled_obs, self.observation_space.dtype,
+                                               self.action_space, self.config['past'])
         print((self.config['memsize'],) + tuple(n_input))
 
     def learn(self, force=False, print_iteration=False):
+        self.update_learning_rate()
         for m in self.models:
             self.models[m].train()
         if self.config['copyQ'] > 0 and self.config['num_updates'] % self.config['copyQ'] == 0:
@@ -392,21 +410,22 @@ class deepQconv(object):
 
         update = (np.random.random() < self.config['probupdate'])
         if update or force:
-            self.memory.memoryLock.acquire()
             if self.memory.sizemem() > self.config['randstart']:
                 self.config['num_updates'] += 1
                 if self.config['priority_memory']:
-                    prob_mem = self.memory.get_priorities()+0.000001
+                    prob_mem = self.memory.get_priorities() + 0.000001
                     prob_mem /= prob_mem.sum()
-                    ind = np.random.choice(self.memory.sizemem()-1, self.config['batch_size'],p=prob_mem)
+                    ind = self.config['past'] + np.random.choice(self.memory.sizemem() - 1 - self.config['past'],
+                                                                 self.config['batch_size'], p=prob_mem)
                 else:
-                    ind = np.random.choice(self.memory.sizemem()-1, self.config['batch_size'])
-                allstate = np.zeros((ind.shape[0],) + self.memory[ind[0]][0].shape)
-                nextstates = np.zeros((ind.shape[0],) + self.memory[ind[0]][0].shape)
-                currew = np.zeros((ind.shape[0], 1))
-                maxsteps_reward = np.zeros((ind.shape[0], 1))
-                notdonevec = np.zeros((ind.shape[0], 1))
-                allactionsparse = np.zeros((ind.shape[0], self.n_out))
+                    ind = self.config['past'] + np.random.choice(self.memory.sizemem() - 1 - self.config['past'],
+                                                                 self.config['batch_size'])
+                allstate = np.zeros((ind.shape[0],) + self.memory[ind[0]][0].shape,dtype=np.float32)
+                nextstates = np.zeros((ind.shape[0],) + self.memory[ind[0]][0].shape,dtype=np.float32)
+                currew = np.zeros((ind.shape[0], 1),dtype=np.float32)
+                maxsteps_reward = np.zeros((ind.shape[0], 1),dtype=np.float32)
+                notdonevec = np.zeros((ind.shape[0], 1),dtype=np.float32)
+                allactionsparse = np.zeros((ind.shape[0], self.n_out),dtype=np.float32)
                 i = 0
                 #  [0 state, 1 action, 2 reward, 3 notdone, 4 step, 5 total_reward]
 
@@ -430,7 +449,7 @@ class deepQconv(object):
                             maxsteps_reward[i, 0] += gamma * self.memory[n][2]
                             gamma = gamma * self.config['discount']
                             if n + nextstate * 2 >= self.memory.sizemem() or not (offset + nextstate < limitd) or \
-                                            self.memory[n][3] == 0:
+                                    self.memory[n][3] == 0:
                                 maxsteps_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0]) * \
                                                          self.memory[n][3]
                                 nextstate = None
@@ -442,7 +461,6 @@ class deepQconv(object):
                         maxsteps_reward[i, 0] = self.memory[j][5]
                     i += 1
 
-                self.memory.memoryLock.release()
                 flag = np.random.random() < 0.5 and self.fulldouble
                 self.optimizer.zero_grad()
                 if self.config['doubleQ'] and flag:
@@ -460,12 +478,13 @@ class deepQconv(object):
                             self.y: alltarget.reshape((-1, 1)),
                             self.curraction: allactionsparse})
                 else:
-                    allactionsparse = torch.from_numpy(allactionsparse).float().to(self.device,non_blocking=True)
-                    allstate = torch.from_numpy(allstate).float().to(self.device,non_blocking=True)
-                    nextstates = torch.from_numpy(nextstates).float().to(self.device,non_blocking=True)
-                    currew = torch.from_numpy(currew.reshape((-1,))).float().to(self.device,non_blocking=True)
-                    notdonevec = torch.from_numpy(notdonevec.reshape((-1,))).float().to(self.device,non_blocking=True)
-                    maxsteps_reward = torch.from_numpy(maxsteps_reward.reshape((-1,))).float().to(self.device,non_blocking=True)
+                    allactionsparse = torch.from_numpy(allactionsparse).to(self.device, non_blocking=True)
+                    allstate = torch.from_numpy(allstate).to(self.device, non_blocking=True)
+                    nextstates = torch.from_numpy(nextstates).to(self.device, non_blocking=True)
+                    currew = torch.from_numpy(currew.reshape((-1,))).to(self.device, non_blocking=True)
+                    notdonevec = torch.from_numpy(notdonevec.reshape((-1,))).to(self.device, non_blocking=True)
+                    maxsteps_reward = torch.from_numpy(maxsteps_reward.reshape((-1,))).to(self.device,
+                                                                                                  non_blocking=True)
                     shared_features = self.shared(allstate)
                     if self.config['copyQ'] > 0:
                         next_shared_features = self.copy_shared(nextstates)
@@ -484,7 +503,7 @@ class deepQconv(object):
 
                     if self.config['episodic']:
                         target = (currew + self.config["discount"] * maxQnext * notdonevec) * (
-                            1. - self.config['lambda'])
+                                1. - self.config['lambda'])
                     else:
                         target = (currew + self.config["discount"] * maxQnext) * (1. - self.config['lambda'])
                     if self.config['lambda'] > 0:
@@ -499,20 +518,20 @@ class deepQconv(object):
                         loss = self.criterion(singleQ / self.avg_target,
                                               target / self.avg_target)
                         if np.random.random() < 0.001:
-                            print("avg target", self.avg_target.data.item(),"loss",loss.mean().data.item())
+                            print("avg target", self.avg_target.data.item(), "loss", loss.mean().data.item())
                     else:
                         loss = self.criterion(singleQ, target)
-                    #if np.random.random() < 0.1:
+                    # if np.random.random() < 0.1:
                     #    print("max loss",loss.max().data.item(),"abs diff",torch.max(torch.abs(singleQ-target)).data.item())
                     if self.config['priority_memory']:
-                        alpha = 0.7*0.5 # 0.5 because the loss is squared td error
-                        self.memory.set_priority(ind, np.minimum((loss**alpha).cpu().detach().numpy(),10.))
+                        alpha = 0.7 * 0.5  # 0.5 because the loss is squared td error
+                        self.memory.set_priority(ind, np.minimum((loss ** alpha).cpu().detach().numpy(), 10.))
                         beta = 0.7
-                        w = 1.0/Variable(torch.from_numpy(prob_mem[ind]).float()).to(self.device,non_blocking=True)
-                        w = w**beta
+                        w = 1.0 / Variable(torch.from_numpy(prob_mem[ind]).float()).to(self.device, non_blocking=True)
+                        w = w ** beta
                         w /= w.max()
-                        #print(w.min(),w.max(),w.max()/w.min())
-                        loss = (loss*w).sum()
+                        # print(w.min(),w.max(),w.max()/w.min())
+                        loss = (loss * w).sum()
                     else:
                         loss = loss.mean()
                     # print("avg",self.avg_target)
@@ -533,7 +552,6 @@ class deepQconv(object):
                             print("dist", torch.mean((pred_next_features_reward - target_tr) ** 2).sqrt().data.item())
                         loss += self.config['transition_weight'] * loss_trans
 
-
                 loss.backward()
                 if 'norm_clip' in self.config and self.config['norm_clip']:
                     torch.nn.utils.clip_grad_norm_(self.learnable_parameters, 0.5)
@@ -541,19 +559,7 @@ class deepQconv(object):
                     torch.nn.utils.clip_grad_value_(self.learnable_parameters, 1)
                 self.optimizer.step()
 
-                # if checkcost:
-                #     costafter = self.sess.run(self.cost,feed_dict={self.x: allstate, self.y: alltarget.reshape((-1, 1)),
-                #                                          self.curraction: allactionsparse})
-                #     print('cost after-before',costafter-costbefore,alltarget[0:5], max(0,self.config['memsize']-self.sizemem))
-                #
-                #     if costafter-costbefore>0 and self.learnrate>self.config["initial_learnrate"]/200:
-                #         self.learnrate *=0.97
-                #     elif self.learnrate<self.config["initial_learnrate"]*5:
-                #         self.learnrate *=1.01
-                # #if np.random.random() <0.01:
-                # #    print('learning',self.sess.run(self.Q,alltarget[0:5].reshape(-1, ))
-            else:
-                self.memory.memoryLock.release()
+
         return self.config['num_updates']
 
     def plot_state(self, state_list):  # fixme use plt instead of plt0
@@ -568,9 +574,9 @@ class deepQconv(object):
         fig.canvas.flush_events()
 
     def learnpolicy(self, startind=None, endind=None):
+        self.update_learning_rate()
         for m in self.models:
             self.models[m].train()
-        self.memory.memoryLock.acquire()
         # todo fix indexing with new indexes
         if startind is None or endind is None:
             print('to check')
@@ -590,7 +596,7 @@ class deepQconv(object):
             Gtv = np.zeros((n, 1), dtype=np.float32)
             if self.memory[endind - 1][3] == 1:
                 # last_state = Variable(torch.from_numpy(self.memory[endind - 1][0].reshape(1,-1)).float()).to(self.device)
-                totalRv = self.evalV(self.memory[endind - 1][0][None,...], numpy=True)[
+                totalRv = self.evalV(self.memory[endind - 1][0][None, ...], numpy=True)[
                     0]  # self.V(last_state)[0, 0].cpu().item()
 
                 Gtv[0] = totalRv
@@ -618,10 +624,10 @@ class deepQconv(object):
             Vallstate = self.evalV(allstate, numpy=False)
             Vnext = torch.cat((Variable(torch.zeros(1, 1, device=self.device)), Vallstate[:-1]), 0).detach()
 
-            notdonevec = Variable(torch.from_numpy(notdonevec)).to(self.device,non_blocking=True)
-            currew = Variable(torch.from_numpy(currew)).to(self.device,non_blocking=True)
-            Gtv = Variable(torch.from_numpy(Gtv)).to(self.device,non_blocking=True)
-            allactions = Variable(torch.from_numpy(allactions)).to(self.device,non_blocking=True)
+            notdonevec = Variable(torch.from_numpy(notdonevec)).to(self.device, non_blocking=True)
+            currew = Variable(torch.from_numpy(currew)).to(self.device, non_blocking=True)
+            Gtv = Variable(torch.from_numpy(Gtv)).to(self.device, non_blocking=True)
+            allactions = Variable(torch.from_numpy(allactions)).to(self.device, non_blocking=True)
             # Vnext = np.append([[0]],Vallstate[:-1],axis=0)
             if self.config['episodic']:
                 targetV = currew + self.config['discount'] * Vnext * notdonevec
@@ -641,7 +647,7 @@ class deepQconv(object):
                     print('currew', (currew).reshape(-1, )[0:5], (currew).reshape(-1, )[-5:])
                     print('Gtv', (Gtv).reshape(-1, )[0:5], (Gtv).reshape(-1, )[-5:])
                     print('targetV', (targetV).reshape(-1, )[0:5], (targetV).reshape(-1, )[-5:])
-                    print('Vstate', Vallstate.reshape(-1, )[0:5],Vallstate.reshape(-1, )[-5:])
+                    print('Vstate', Vallstate.reshape(-1, )[0:5], Vallstate.reshape(-1, )[-5:])
                     print((notdonevec).reshape(-1, )[0:5], (notdonevec).reshape(-1, )[-5:])
 
                 targetV = targetV * (1 - self.config['lambda']) + Gtv * self.config['lambda']
@@ -650,16 +656,15 @@ class deepQconv(object):
                 if self.config['discounted_policy_grad'] == False:
                     listdiscounts = 1.
                 else:
-                    listdiscounts = Variable(torch.from_numpy(listdiscounts).float()).to(self.device,non_blocking=True)
+                    listdiscounts = Variable(torch.from_numpy(listdiscounts).float()).to(self.device, non_blocking=True)
                 targetp = 1 * listdiscounts * (targetV - Vallstate)
-                targetp = (targetp - targetp.mean()) / (targetp.std()+0.000001)
+                targetp = (targetp - targetp.mean()) / (targetp.std() + 0.000001)
                 targetp = targetp.detach()
                 # print(targetp.shape)
                 # targetp = listdiscounts*(Gt- self.sess.run(self.V, feed_dict={self.x: allstate}))
             else:
                 raise Exception('non-episodic not implemented')
                 exit(-1)
-            self.memory.memoryLock.release()
 
             self.optimizer.zero_grad()
             logit = self.eval_policy(allstate, numpy=False, logit=True)
@@ -681,15 +686,14 @@ class deepQconv(object):
                 v_loss = self.criterion(Vallstate, targetV.detach())
             # v_loss = v_loss/v_loss.detach()
             # errorpolicy = errorpolicy/errorpolicy.detach()
-            loss = errorpolicy +  3*v_loss  # fixme
+            loss = errorpolicy + 3 * v_loss  # fixme
             if torch.isnan(logpolicy).any():
-                print("a",allactions, logpolicy, targetp,"logit",logit)
+                print("a", allactions, logpolicy, targetp, "logit", logit)
             loss.backward()
             self.optimizer.step()
 
             return True
         else:
-            self.memory.memoryLock.release()
             return False
 
     def maxq(self, observation):
@@ -701,11 +705,11 @@ class deepQconv(object):
             else:
                 observation = observation.reshape(tuple([1] + list(observation.shape)))
             if self.copyQalone:
-                var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
+                var_obs = torch.from_numpy(observation).float().to(self.device, non_blocking=True)
                 currQ = self.copy_Q(self.copy_shared(var_obs)).cpu().data.numpy()
                 return np.max(currQ).reshape(1, )
             else:
-                var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
+                var_obs = torch.from_numpy(observation).float().to(self.device, non_blocking=True)
                 currQ = self.Q(self.shared(var_obs)).cpu().data.numpy()
                 return np.max(currQ).reshape(1, )
 
@@ -742,10 +746,10 @@ class deepQconv(object):
             if self.config['doubleQ'] and (self.fulldouble and np.random.random() < 0.5):
                 return np.argmax(self.sess.run(self.Q2, feed_dict={self.x: observation}))
             else:
-                var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
+                var_obs = Variable(torch.from_numpy(observation).float()).to(self.device, non_blocking=True)
                 shared_features = self.shared(var_obs)
                 if np.random.random() < 0.001:
-                    logger.debug("shared_features {}".format( shared_features.cpu().data.numpy().reshape(-1,)[:100]))
+                    logger.debug("shared_features {}".format(shared_features.cpu().data.numpy().reshape(-1, )[:100]))
                 currQ = self.Q(shared_features).cpu().data.numpy()
                 best_action = np.argmax(currQ)
 
@@ -757,8 +761,8 @@ class deepQconv(object):
         for m in self.models:
             self.models[m].eval()
         assert observation.ndim > 1
-        var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
-        currQ = self.Q(self.shared(var_obs)).cpu().data.numpy() #fixme is this necessary?
+        var_obs = Variable(torch.from_numpy(observation).float()).to(self.device, non_blocking=True)
+        currQ = self.Q(self.shared(var_obs)).cpu().data.numpy()  # fixme is this necessary?
         return currQ
 
     def eval_policy(self, observation, numpy, logit=False):
@@ -768,7 +772,7 @@ class deepQconv(object):
             if observation.ndim == 1:
                 observation = observation.reshape(1, -1)
         input = Variable(torch.from_numpy(observation)).float()
-        input = input.to(self.device,non_blocking=True)
+        input = input.to(self.device, non_blocking=True)
         if logit:
             prob = self.logitpolicy(self.shared(input))
         else:
@@ -783,7 +787,7 @@ class deepQconv(object):
             self.models[m].eval()
         assert observation.ndim > 1
         input = Variable(torch.from_numpy(observation)).float()
-        input = input.to(self.device,non_blocking=True)
+        input = input.to(self.device, non_blocking=True)
         v = self.V(self.shared(input))
         if numpy:
             return v.cpu().data.numpy()
@@ -823,10 +827,11 @@ class deepQconv(object):
                 observation = observation.reshape(1, -1)
             else:
                 observation = observation.reshape(tuple([1] + list(observation.shape)))
-            var_obs = Variable(torch.from_numpy(observation).float()).to(self.device,non_blocking=True)
+            var_obs = Variable(torch.from_numpy(observation).float()).to(self.device, non_blocking=True)
             shared_features = self.shared(var_obs)
             best_action_onehot = onehot(action, self.n_out).reshape(1, -1)
-            best_action_onehot = Variable(torch.from_numpy(best_action_onehot).float()).to(self.device,non_blocking=True)
+            best_action_onehot = Variable(torch.from_numpy(best_action_onehot).float()).to(self.device,
+                                                                                           non_blocking=True)
             self.state_list[0].append(shared_features.cpu().data.numpy())
             in_tr = torch.cat((shared_features, best_action_onehot), 1)
             # print(in_tr.shape)
@@ -845,3 +850,8 @@ class deepQconv(object):
         if np.random.random() < 0.001:
             print('prob', prob)
         return action
+
+    def update_learning_rate(self):
+        self.learnrate = self.config['initial_learnrate'] * self.config['decay_learnrate'] ** (self.config['num_updates'] / 1000000.0)
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = self.learnrate

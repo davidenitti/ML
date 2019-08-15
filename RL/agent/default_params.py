@@ -26,10 +26,10 @@ def get_default(nameenv):
             "entropy":0.001,
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.01,
-            "decay": 0.995,  # Epsilon decay in epsilon greedy policies
+            "linear_decay": 0.00001,#"decay": 0.995,  # Epsilon decay in epsilon greedy policies
             "initial_learnrate": 0.001,
             "eps_optim": 1e-8, # 1.5e-4 before
-            "decay_learnrate": 0.9999,
+            "decay_learnrate": 1,
             "discount": 0.99,
             "batch_size": 256,
             "episodic": True,
@@ -56,7 +56,7 @@ def get_default(nameenv):
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.05,
             "testeps": 0.00,
-            "decay": 0.996,  # Epsilon decay in epsilon greedy policies
+            "linear_decay": 0.00001,#"decay": 0.996,  # Epsilon decay in epsilon greedy policies
             "batch_norm" : False,
             "memsize": 150000,
             "randstart": 100,
@@ -88,17 +88,17 @@ def get_default(nameenv):
         params = {
             'transition_net':False,
             "normalize":False,
-            "priority_memory":True,
+            "priority_memory":False,
             "loss":"clipmse",
             "optimizer":"adam",
-            "initial_learnrate": 0.00025,
+            "initial_learnrate": 0.0002,
             "eps_optim": 1e-4,
-            "decay_learnrate": 1,
+            "decay_learnrate": 0.5, # every 1m updates
             "lambda": 0.,
             "eps": 0.6,  # Epsilon in epsilon greedy policies
             "mineps": 0.05,
             "testeps": 0.00,
-            "decay": 0.9955,  # Epsilon decay in epsilon greedy policies
+            "linear_decay": 0.000008,#"decay": 0.9955,  # Epsilon decay in epsilon greedy policies
             "batch_norm" : False,
             "memsize": 100000,
             "randstart": 100,
@@ -111,7 +111,7 @@ def get_default(nameenv):
             "limitreward": None,
             "probupdate": 1,
             "entropy":0.01,
-            "past": 0,
+            "past": 0,#fixme
             "discount": 0.99,
             "batch_size": 64,
             "episodic": True,
@@ -132,8 +132,8 @@ def get_default(nameenv):
             "normalize": False,
             "loss":"clipmse",
             "start_episode": 0,
-            "memsize": 360000,
-            "randstart": 5000,
+            "memsize": 400000,
+            "randstart": 15000,
             "policy":False,
             "priority_memory": False,
             "batch_norm": False,
@@ -142,22 +142,22 @@ def get_default(nameenv):
             "scaleobs": 1./255.,
             "limitreward": [-1., 1.],
             'doubleQ':False,
-            "copyQ":25,
-            "probupdate": 1.,
+            "copyQ":1000,
+            "probupdate": 1,
             "lambda": 0.,
             "entropy": 0.01,
             "episodic":False,
             "past": 3,
-            "eps":  .99,  # Epsilon in epsilon greedy policies
+            "eps":  1,  # Epsilon in epsilon greedy policies
             "mineps": 0.1,
             "testeps": 0.05,
-            "decay": 0.9996,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.0002,
-            "momentum": 0.95,
-            "eps_optim": 1e-3,
+            "linear_decay": 0.000001,  # Epsilon decay in epsilon greedy policies
+            "initial_learnrate": 0.00025,
+            "momentum": 0.9,
+            "eps_optim": 1e-2,
             "discount": 0.99,
             "val_clip": True,
-            "norm_clip": True,
+            "norm_clip": False,
             "ratio_policy_learnrate": 1,
             "final_learnrate": 0.0001,
             "decay_learnrate": 1,
@@ -186,7 +186,7 @@ def get_default(nameenv):
             "episodic":False,
             "past": 1,
             "eps": 1,  # Epsilon in epsilon greedy policies
-            "decay": 0.999,  # Epsilon decay in epsilon greedy policies
+            "linear_decay": 0.000001,  #"decay": 0.999,  # Epsilon decay in epsilon greedy policies
             "initial_learnrate": 0.0001,
             "decay_learnrate": 0.9999,
             "discount": 0.99,

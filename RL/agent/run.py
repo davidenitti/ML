@@ -42,6 +42,8 @@ def getparams(params):
     parser.add_argument('--monitor', action='store_true', help='monitor')
     parser.add_argument('--logging', default='INFO')
     parser.add_argument('--no_cuda', action='store_false', dest='use_cuda', default=True, help='disable cuda')
+    parser.add_argument('--save_mem', action='store_true', help='save memory')
+
     args = parser.parse_args(params)
     options = vars(args)
 
@@ -59,6 +61,8 @@ def getparams(params):
         params['plot'] = options['plot']
         params['render'] = options['render']
         params['use_cuda'] = options['use_cuda']
+        params['save_mem'] = options['save_mem']
+        params['logging'] = options['logging']
     else:
         params = default_params.get_default(options['target'])
         params.update(options)
@@ -72,7 +76,7 @@ def start_process(func, args):
     return p
 
 
-def upload_res(callback, process_upload=None, upload_checkpoint=False, parallel=False):
+def upload_res(callback, process_upload=None, upload_checkpoint=False, parallel=True):
     if callback is None:
         return None
     print('uploading')
@@ -155,9 +159,6 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
         start_episode = agent.config['start_episode']
 
         for episode in range(start_episode, params['episodes']):
-            # to upload results (used for cloud)
-            if episode > 1 and episode % 50 == 0:
-                process_upload = upload_res(callback, process_upload, upload_ckp)
             if (episode + 1) % testevery == 0 or episode >= params['episodes'] - numavg:
                 is_test = True
             else:
@@ -200,20 +201,36 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
 
             if episode % 10 == 0:
                 print(agent.config)
-            if (episode + 1 - start_episode) % 20 == 0:
+            if (episode + 1 - start_episode) % 150 == 0:
                 if agent.config["path_exp"] is not None:
                     print("saving...")
                     agent.config['start_episode'] = episode
-                    agent.config['results'] = {'num_updates': agent.config['num_updates'],
-                                               'episode': episode + 1,
-                                               'test_reward': np.mean(greedyrewlist[0][-10:]),
-                                               'train_reward': np.mean(totrewlist[-100:]),
-                                               'all_reward': totrewlist}
+                    if 'results' not in agent.config:
+                        agent.config['results'] = {}
+                    if 'all_reward' not in agent.config['results']:
+                        agent.config['results']['all_reward'] = []
+                    if 'all_reward_train' not in agent.config['results']:
+                        agent.config['results']['all_reward_train'] = {}
+
+                    agent.config['results']['all_reward_train'][str(episode + 1)] = np.mean(totrewlist[-100:])
+                    if 'all_reward_test' not in agent.config['results']:
+                        agent.config['results']['all_reward_test'] = {}
+                    agent.config['results']['all_reward_test'][str(episode + 1)] = np.mean(greedyrewlist[0][-10:])
+
+                    agent.config['results']['num_updates'] = agent.config['num_updates']
+                    agent.config['results']['episode'] = episode + 1
+                    agent.config['results']['test_reward'] = np.mean(greedyrewlist[0][-10:])
+                    agent.config['results']['train_reward'] = np.mean(totrewlist[-100:])
+                    agent.config['results']['all_reward'] = [] # fixme
+
+                    if process_upload is not None:
+                        process_upload.join()
                     try:
                         agent.save()
                     except KeyboardInterrupt:
                         agent.save()
                         exit()
+                    process_upload = upload_res(callback, process_upload, upload_ckp)
             if episode % 1 == 0:
                 totrewlist.append(total_rew / agent.config['scalereward'])
 

@@ -6,8 +6,8 @@ import random
 import logging
 logger = logging.getLogger(__name__)
 
-def onehot(i, n):
-    out = np.zeros(n)
+def onehot(i, n, dtype=np.float32):
+    out = np.zeros(n,dtype=dtype)
     out[i] = 1.
     return out
 
@@ -84,7 +84,9 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
         else:
             obnew1 = np.concatenate((ob1[ob.shape[0]:], obnew))
 
-        agent.memory.add([ob1, a, limitreward, 1. - 1. * terminal_memory, t, None])
+        #old
+        #agent.memory.add([ob1, a, limitreward, 1. - 1. * terminal_memory, t, None])
+        agent.memory.add([ob, a, limitreward, 1. - 1. * terminal_memory, t, None])
         start_time3 = time.time()
         if learn and (not agent.config['policy']):
             cost += agent.learn()
@@ -114,12 +116,10 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
             env.render()
 
         if done: break
-        if t % 100 == 0:
-            agent.learnrate *= agent.config['decay_learnrate']
         if t % 5 == 0 and False:#fixme
             print("time step",time.time()-start_time, start_time2 - start_time,start_time3 - start_time2,
                   start_time4-start_time3,time.time() - start_time4)
-    adjust_learning_rate(agent.optimizer, agent.learnrate)
+
     print("min max reward",min_reward,max_reward)
 
     return total_rew, t + 1, total_rew_discount, max_qval
@@ -143,10 +143,7 @@ def preprocess(observation, observation_space, scaled_obs, type='none'):
         o = (observation - observation_space.low) / (observation_space.high - observation_space.low) * 2. - 1.
         return o.reshape(-1, )
 
-def adjust_learning_rate(optimizer, lr):
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return lr
+
 
 class ReplayMemory(object):
     def __init__(self, max_size=100000, copy=False,  use_priority=False):
