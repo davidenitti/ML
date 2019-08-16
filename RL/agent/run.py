@@ -83,6 +83,7 @@ def upload_res(callback, process_upload=None, upload_checkpoint=False, parallel=
     if parallel:
         if process_upload is not None:
             process_upload.join()
+            process_upload.terminate()
         process_upload = start_process(callback, (upload_checkpoint,))
     else:
         try:
@@ -215,6 +216,10 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
                         agent.config['results']['all_reward'] = []
                     if 'all_reward_train' not in agent.config['results']:
                         agent.config['results']['all_reward_train'] = {}
+
+                    if 'ep2updates' not in agent.config['results']:
+                        agent.config['results']['ep2updates'] = {}
+                    agent.config['results']['ep2updates'][str(episode)] = agent.config['num_updates']
 
                     agent.config['results']['all_reward_train'][str(episode)] = np.mean(totrewlist[-100:])
                     if 'all_reward_test' not in agent.config['results']:
