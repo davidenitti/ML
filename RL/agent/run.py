@@ -206,7 +206,7 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
                 print(agent.config)
             totrewlist.append(total_rew / agent.config['scalereward'])
             total_rew_discountlist.append(total_rew_discount / agent.config['scalereward'])
-            if (episode + 1 - start_episode) % 200 == 0:
+            if (episode + 1 - start_episode) % 250 == 0:
                 if agent.config["path_exp"] is not None:
                     print("saving...")
                     agent.config['final_episode'] = episode

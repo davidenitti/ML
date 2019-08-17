@@ -42,6 +42,7 @@ class DenseNet(nn.Module):
         self.scale = scale
         self.final_act = final_act
         self.act = activ(activation)
+        reset_weights(self)
     def forward(self, x):
         x = x * self.scale
         if self.batch_norm:
@@ -78,7 +79,7 @@ class ConvNet(nn.Module):
         self.act = activ(activation)
         if batch_norm:
             self.bn = nn.ModuleList(self.bn)
-
+        reset_weights(self)
     def forward(self, x):
         x = x * self.scale
         for i,c in enumerate(self.conv):

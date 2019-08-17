@@ -91,15 +91,17 @@ def get_default(nameenv):
             "priority_memory":False,
             "loss":"clipmse",
             "optimizer":"adam",
-            "initial_learnrate": 0.00021,
+            "initial_learnrate": 0.0002,
             "eps_optim": 1e-4,
-            "decay_learnrate": 0.5, # every 1m updates
+            "decay_learnrate": 1, # every 1m updates
             "lambda": 0.,
             "eps": 0.6,  # Epsilon in epsilon greedy policies
             "mineps": 0.05,
             "testeps": 0.00,
-            "linear_decay": 0.000008,#"decay": 0.9955,  # Epsilon decay in epsilon greedy policies
+            "exp_decay": 0.9955,  # Epsilon decay in epsilon greedy policies
             "batch_norm" : False,
+            "val_clip": False,
+            "norm_clip": True,
             "memsize": 100000,
             "randstart": 100,
             "policy":False,
@@ -156,7 +158,7 @@ def get_default(nameenv):
             "momentum": 0.95,
             "eps_optim": 1e-2,
             "discount": 0.99,
-            "val_clip": True,
+            "val_clip": False,
             "norm_clip": True,
             "ratio_policy_learnrate": 1,
             "final_learnrate": 0.0001,
