@@ -36,8 +36,7 @@ class deepQconv(object):
             json.dump(self.config, input_file, indent=3)
         if self.config['save_mem']:
             logger.info('saving memory')
-            with open(filename + "_mem.p", "wb") as input_file:
-                pickle.dump(self.memory, input_file)
+            buffers.save_zipped_pickle(self.memory, filename + "_mem.p",zip=False)
         checkpoint = {"optimizer": self.optimizer.state_dict()}
         for m in self.models:
             checkpoint[m] = self.models[m].state_dict()
@@ -141,7 +140,11 @@ class deepQconv(object):
         elif episode == -1:
             return self.config['testeps']
         else:
-            return max(self.config['mineps'],
+            if 'exp_decay' in self.config:
+                assert 'linear_decay' not in self.config
+                return max(self.config['mineps'], self.config['eps'] * self.config['exp_decay'] ** episode)
+            else:
+                return max(self.config['mineps'],
                        self.config['eps'] - (self.config['eps'] - self.config['mineps']) * self.config['linear_decay'] *
                        self.config['num_updates'])
 
@@ -384,10 +387,10 @@ class deepQconv(object):
         if 'num_updates' not in self.config:
             self.config['num_updates'] = 0
 
-        if self.config["path_exp"] is not None and os.path.exists(self.config["path_exp"] + "_mem.p"):
-            with open(self.config["path_exp"] + "_mem.p", "rb") as input_file:
-                self.memory = pickle.load(input_file)
-                logger.info('memory loaded')
+        if self.config["path_exp"] is not None and (os.path.exists(self.config["path_exp"] + "_mem.p")
+                                                    or os.path.exists(self.config["path_exp"] + "_mem.p.zip")):
+            self.memory = buffers.load_zipped_pickle(self.config["path_exp"] + "_mem.p")
+            logger.info('memory loaded')
         else:
             # self.memory = ReplayMemory(self.config['memsize'],use_priority=self.config['priority_memory'])
             self.memory = buffers.ReplayMemory(self.config['memsize'], self.scaled_obs, self.observation_space.dtype,
@@ -407,54 +410,38 @@ class deepQconv(object):
         if update or force:
             if self.memory.sizemem() > self.config['randstart']:
                 self.config['num_updates'] += 1
-                if self.config['priority_memory']:
-                    prob_mem = self.memory.get_priorities() + 0.000001
-                    prob_mem /= prob_mem.sum()
-                    ind = self.config['past'] + np.random.choice(self.memory.sizemem() - 1 - self.config['past'],
-                                                                 self.config['batch_size'], p=prob_mem)
-                else:
-                    ind = self.config['past'] + np.random.choice(self.memory.sizemem() - 1 - self.config['past'],
-                                                                 self.config['batch_size'])
-                allstate = np.zeros((ind.shape[0],) + self.memory[ind[0]][0].shape,dtype=np.float32)
-                nextstates = np.zeros((ind.shape[0],) + self.memory[ind[0]][0].shape,dtype=np.float32)
-                currew = np.zeros((ind.shape[0], 1),dtype=np.float32)
-                maxsteps_reward = np.zeros((ind.shape[0], 1),dtype=np.float32)
-                notdonevec = np.zeros((ind.shape[0], 1),dtype=np.float32)
-                allactionsparse = np.zeros((ind.shape[0], self.n_out),dtype=np.float32)
+                ind = self.memory.sample(self.config['batch_size'])
+                allstate, actions, currew, notdonevec, step_vec, maxsteps_reward = self.memory[ind]
+                nextstates, _, _ , _, _, _ = self.memory[ind+1]
+                allactionsparse = np.eye(self.n_out,dtype=np.float32)[actions]
                 i = 0
                 #  [0 state, 1 action, 2 reward, 3 notdone, 4 step, 5 total_reward]
+                if self.config['lambda'] > 0:
+                    raise NotImplementedError
+                    #fixme old code won't work anymore
+                    for j in ind:
+                        if (np.random.random() < 0.01 or maxsteps_reward[j,0].isnan()):
+                            limitd = 500
+                            gamma = 1.
+                            offset = 0
+                            nextstate = 1  # next state relative index
 
-                for j in ind:
-                    allstate[i] = self.memory[j][0]
-                    if self.memory[j][3] == 1:
-                        nextstates[i] = self.memory[j + 1][0]
-                        # assert (nextstates[i]==self.memory[j][-1]).all()
-                    currew[i, 0] = self.memory[j][2]
-                    notdonevec[i, 0] = self.memory[j][3]
-                    allactionsparse[i] = onehot(self.memory[j][1], self.n_out)
-
-                    if self.config['lambda'] > 0 and (np.random.random() < 0.01 or self.memory[j][5] is None):
-                        limitd = 500
-                        gamma = 1.
-                        offset = 0
-                        nextstate = 1  # next state relative index
-
-                        n = j
-                        while nextstate != None and offset < limitd:
-                            maxsteps_reward[i, 0] += gamma * self.memory[n][2]
-                            gamma = gamma * self.config['discount']
-                            if n + nextstate * 2 >= self.memory.sizemem() or not (offset + nextstate < limitd) or \
-                                    self.memory[n][3] == 0:
-                                maxsteps_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0][None,...]) * \
-                                                         self.memory[n][3]
-                                nextstate = None
-                            else:
-                                offset += nextstate
-                                n = j + offset
-                        self.memory[j][5] = maxsteps_reward[i, 0]
-                    else:
-                        maxsteps_reward[i, 0] = self.memory[j][5]
-                    i += 1
+                            n = j
+                            while nextstate != None and offset < limitd:
+                                maxsteps_reward[i, 0] += gamma * self.memory[n][2]
+                                gamma = gamma * self.config['discount']
+                                if n + nextstate * 2 >= self.memory.sizemem() or not (offset + nextstate < limitd) or \
+                                        self.memory[n][3] == 0:
+                                    maxsteps_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0][None,...]) * \
+                                                             self.memory[n][3]
+                                    nextstate = None
+                                else:
+                                    offset += nextstate
+                                    n = j + offset
+                            self.memory[j][5] = maxsteps_reward[i, 0]
+                        else:
+                            maxsteps_reward[i, 0] = self.memory[j][5]
+                        i += 1
 
                 flag = np.random.random() < 0.5 and self.fulldouble
                 self.optimizer.zero_grad()
@@ -474,8 +461,8 @@ class deepQconv(object):
                             self.curraction: allactionsparse})
                 else:
                     allactionsparse = torch.from_numpy(allactionsparse).to(self.device, non_blocking=True)
-                    allstate = torch.from_numpy(allstate).to(self.device, non_blocking=True)
-                    nextstates = torch.from_numpy(nextstates).to(self.device, non_blocking=True)
+                    allstate = torch.from_numpy(allstate).to(self.device, non_blocking=True).float()
+                    nextstates = torch.from_numpy(nextstates).to(self.device, non_blocking=True).float()
                     currew = torch.from_numpy(currew.reshape((-1,))).to(self.device, non_blocking=True)
                     notdonevec = torch.from_numpy(notdonevec.reshape((-1,))).to(self.device, non_blocking=True)
                     maxsteps_reward = torch.from_numpy(maxsteps_reward.reshape((-1,))).to(self.device,
