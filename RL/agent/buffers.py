@@ -53,8 +53,8 @@ class ReplayMemory(object):
         if self.history > 0:
             idx_list = np.array([np.arange(i - self.history, i + 1) for i in item])
             idx_list = np.maximum(0, idx_list)
-            if min(item) < self.history:
-                assert len(self.info_mem) <= self.last_ind + 1  # to check fixme (maybe used only in policy learning
+            #if min(item) < self.history:
+            #    assert len(self.info_mem) <= self.last_ind + 1  # to check fixme (maybe used only in policy learning
             idx = (self.start_ind + idx_list + self.max_size) % self.max_size
             val = [self.obs_mem[idx], self.action_mem[idx[:,-1]], self.reward_mem[idx[:,-1]],
                    self.notdone_mem[idx[:,-1]], self.step_mem[idx[:,-1]], self.totalr_mem[idx[:,-1]]]
@@ -88,9 +88,9 @@ class ReplayMemory(object):
         if self.use_priority:
             prob_mem = self.get_priorities() + 0.000001
             prob_mem /= prob_mem.sum()
-            ind = self.history + np.random.choice(self.sizemem() - 1 - self.history, batch_size, p=prob_mem)
+            ind = np.random.choice(self.sizemem() - 1, batch_size, p=prob_mem)
         else:
-            ind = self.history + np.random.choice(self.sizemem() - 1 - self.history, batch_size)
+            ind = np.random.choice(self.sizemem() - 1, batch_size)
         return ind
 
     def set_priority(self, idx, vals):  # item has to be from 0 to len(mem)-1
@@ -160,11 +160,11 @@ def load_zipped_pickle(filename):
 
 if __name__ == '__main__':
     mem = ReplayMemory(10, [2,3,1], np.float32, np.array([1]), history=3)
-    for i in range(100):
+    for i in range(4):
         mem.add(np.array([[i,i+0.5,i],[i,i+0.5,i]]).reshape(2,3,1), np.array([i]), 1,1,i,np.nan)
     save_zipped_pickle(mem,'tmp.mem')
     mem = load_zipped_pickle('tmp.mem')
     idx = mem.sample(2)
     print(idx)
     tmp = mem[idx]
-    print(tmp[0].shape)
+    print(tmp[0])
