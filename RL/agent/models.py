@@ -24,7 +24,8 @@ class ScaledIdentity(nn.Module):
 
 
 class DenseNet(nn.Module):
-    def __init__(self, dense_layers, input_shape, scale=1.0, final_act=False, activation='relu', batch_norm=False):
+    def __init__(self, dense_layers, input_shape, scale=1.0, final_act=False, activation='relu',
+                 batch_norm=False, init_weight=True):
         super(DenseNet, self).__init__()
         self.dense = []
 
@@ -42,7 +43,8 @@ class DenseNet(nn.Module):
         self.scale = scale
         self.final_act = final_act
         self.act = activ(activation)
-        reset_weights(self)
+        if init_weight:
+            reset_weights(self)
     def forward(self, x):
         x = x * self.scale
         if self.batch_norm:
@@ -62,7 +64,7 @@ class DenseNet(nn.Module):
 
 # TODO add batch_norm
 class ConvNet(nn.Module):
-    def __init__(self, convlayers, input_shape, scale=1.0, activation='relu', batch_norm=False):
+    def __init__(self, convlayers, input_shape, scale=1.0, activation='relu', batch_norm=False,init_weight=True):
         super(ConvNet, self).__init__()
         self.conv = []
         self.bn = []
@@ -79,7 +81,8 @@ class ConvNet(nn.Module):
         self.act = activ(activation)
         if batch_norm:
             self.bn = nn.ModuleList(self.bn)
-        reset_weights(self)
+        if init_weight:
+            reset_weights(self)
     def forward(self, x):
         x = x * self.scale
         for i,c in enumerate(self.conv):

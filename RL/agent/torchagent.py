@@ -170,13 +170,15 @@ class deepQconv(object):
             dense_conv = models.ConvNet(self.config['convlayers'], input,
                                         activation=self.config['activation'],
                                         # numchannels=1 + 1 * self.config['past'],
-                                        scale=self.config['scaleobs'])
+                                        scale=self.config['scaleobs'],
+                                        init_weight=self.config["init_weight"])
             dense_conv_shape = dense_conv(torch.zeros([1] + input)).shape
             if len(self.config['sharedlayers']) > 0:
                 dense = models.DenseNet(self.config['sharedlayers'], input_shape=dense_conv_shape[-1],
                                         scale=1, final_act=True,
                                         activation=self.config['activation'],
-                                        batch_norm=self.config["batch_norm"])
+                                        batch_norm=self.config["batch_norm"],
+                                        init_weight=self.config["init_weight"])
                 dense = nn.Sequential(dense_conv, dense)
                 num_features = self.config['sharedlayers'][-1]
             else:
@@ -186,7 +188,8 @@ class deepQconv(object):
             if len(self.config['sharedlayers']) > 0:
                 dense = models.DenseNet(self.config['sharedlayers'], input_shape=input[-1],
                                         scale=self.config['scaleobs'], final_act=True,
-                                        activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+                                        activation=self.config['activation'], batch_norm=self.config["batch_norm"],
+                                        init_weight=self.config["init_weight"])
                 num_features = self.config['sharedlayers'][-1]
             else:
                 dense = models.ScaledIdentity(self.config['scaleobs'])
@@ -199,7 +202,8 @@ class deepQconv(object):
     def Qnet(self, input, state_dict=None):
         layers = self.config['hiddenlayers']
         Q = models.DenseNet(layers + [self.n_out], input_shape=input, scale=1, final_act=False,
-                            activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+                            activation=self.config['activation'], batch_norm=self.config["batch_norm"],
+                            init_weight=self.config["init_weight"])
         if state_dict:
             Q.load_state_dict(state_dict)
             logger.info('Q loaded')
@@ -209,7 +213,8 @@ class deepQconv(object):
         layers = self.config['hiddenlayers']
         logitpolicy = models.DenseNet(layers + [self.n_out], input_shape=input,
                                       scale=1, activation=self.config['activation'],
-                                      batch_norm=self.config["batch_norm"])
+                                      batch_norm=self.config["batch_norm"],
+                                      init_weight=self.config["init_weight"])
         if state_dict:
             logitpolicy.load_state_dict(state_dict)
             logger.info('policyNet loaded')
@@ -218,7 +223,8 @@ class deepQconv(object):
     def Vnet(self, input, state_dict=None):
         layers = self.config['hiddenlayers']
         V = models.DenseNet(layers + [1], input_shape=input, final_act=False,
-                            scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+                            scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"],
+                            init_weight=self.config["init_weight"])
         if state_dict:
             V.load_state_dict(state_dict)
             logger.info('V loaded')
@@ -227,7 +233,8 @@ class deepQconv(object):
     def transition_net(self, len_shared_features, actions, state_dict=None):
         layers = [128, len_shared_features]  # fixme
         m = models.DenseNet(layers, input_shape=len_shared_features + actions, final_act=False,
-                            scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"])
+                            scale=1, activation=self.config['activation'], batch_norm=self.config["batch_norm"],
+                            init_weight=self.config["init_weight"])
         if state_dict:
             m.load_state_dict(state_dict)
             logger.info('Tr loaded')
@@ -728,7 +735,7 @@ class deepQconv(object):
             if self.config['doubleQ'] and (self.fulldouble and np.random.random() < 0.5):
                 return np.argmax(self.sess.run(self.Q2, feed_dict={self.x: observation}))
             else:
-                var_obs = Variable(torch.from_numpy(observation).float()).to(self.device, non_blocking=True)
+                var_obs = torch.from_numpy(observation).to(self.device, non_blocking=True).float()
                 shared_features = self.shared(var_obs)
                 if np.random.random() < 0.001:
                     logger.debug("shared_features {}".format(shared_features.cpu().data.numpy().reshape(-1, )[:100]))
