@@ -7,6 +7,7 @@ from . import common
 from . import default_params
 from . import torchagent
 from . import agent_utils
+from . import env_utils
 
 import time
 import numpy as np
@@ -14,9 +15,7 @@ import gym
 import gym.spaces
 from multiprocessing import Process
 import logging
-from vel.rl.vecenv.subproc import SubprocVecEnvWrapper
-from vel.rl.vecenv.dummy import DummyVecEnvWrapper
-from vel.rl.env.classic_atari import ClassicAtariEnv
+
 
 import argparse
 import os
@@ -109,12 +108,22 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
 
     nameenv = params['target']
 
-    # vec_env = DummyVecEnvWrapper(
-    #     ClassicAtariEnv('BreakoutNoFrameskip-v4'), frame_history=4
-    # ).instantiate(parallel_envs=1, seed=params["seed"])
-
     reward_threshold = gym.envs.registry.spec(nameenv).reward_threshold
-    env = gym.make(nameenv)
+    if 'baseline_env' in params and params['baseline_env']:
+        if params['path_exp']:
+            stats_path = os.path.join(params["res_dir"], 'stats')
+            if not os.path.exists(stats_path):
+                os.makedirs(stats_path)
+        else:
+            stats_path = None
+        env = env_utils.build_env(nameenv, env_type=None, num_env=1, batch=False,
+                                  seed=params["seed"], reward_scale=params['scalereward'], gamestate=None,
+                                  logger_dir=stats_path)
+        reward_range = env.reward_range#env.envs[0].reward_range
+    else:
+        env = gym.make(nameenv)
+        reward_range = env.reward_range
+        env.seed(params["seed"])
 
     if params['monitor'] == True:  # store performance and video
         from gym import wrappers
@@ -126,19 +135,19 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
         log_file = None
 
     common.init_logger(log_file, params['logging'])
-
+    logger.info('start RL agent')
     logger.info('params ' + str(params))
+
     logger.info(str(
-        (env.observation_space, env.action_space, 'max_episode_steps', env.spec.max_episode_steps, env.reward_range)))
+        (env.observation_space, env.action_space, 'max_episode_steps', env.spec.max_episode_steps, reward_range)))
     for p in params:
         logger.debug(p + " " + str(params[p]))
 
     if params["seed"] > 0:
-        env.seed(params["seed"])
         np.random.seed(params["seed"])
         logger.debug("seed " + str(params["seed"]))
     try:
-        agent = torchagent.deepQconv(env.observation_space, env.action_space, env.reward_range, params)
+        agent = torchagent.deepQconv(env.observation_space, env.action_space, reward_range, params)
         num_steps = env.spec.max_episode_steps
         avg = None
         process_upload = None
@@ -146,8 +155,8 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
             plt.ion()
 
         totrewlist = []
-        greedyrewlist = [[], []]
-        totrewavglist = []
+        test_rew_epis = [[], []]
+        test_rew_smooth = []
         total_rew_discountlist = []
         testevery = 25
         useConv = agent.config['conv']
@@ -196,11 +205,11 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
             if avg is None:
                 avg = total_rew
             if is_test:
-                greedyrewlist[0].append(total_rew / agent.config['scalereward'])
-                greedyrewlist[1].append(episode)
+                test_rew_epis[0].append(total_rew / agent.config['scalereward'])
+                test_rew_epis[1].append(episode)
                 inc = max(0.2, 0.05 + 1. / (episode) ** 0.5)
                 avg = avg * (1 - inc) + inc * total_rew
-                totrewavglist.append(avg / agent.config['scalereward'])
+                test_rew_smooth.append(avg / agent.config['scalereward'])
 
             if episode % 10 == 0:
                 print(agent.config)
@@ -221,14 +230,18 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
                         agent.config['results']['ep2updates'] = {}
                     agent.config['results']['ep2updates'][str(episode)] = agent.config['num_updates']
 
+                    if 'ep2steps' not in agent.config['results']:
+                        agent.config['results']['ep2steps'] = {}
+                    agent.config['results']['ep2steps'][str(episode)] = total_steps
+
                     agent.config['results']['all_reward_train'][str(episode)] = np.mean(totrewlist[-100:])
                     if 'all_reward_test' not in agent.config['results']:
                         agent.config['results']['all_reward_test'] = {}
-                    agent.config['results']['all_reward_test'][str(episode)] = np.mean(greedyrewlist[0][-10:])
+                    agent.config['results']['all_reward_test'][str(episode)] = np.mean(test_rew_epis[0][-10:])
 
                     agent.config['results']['num_updates'] = agent.config['num_updates']
                     agent.config['results']['episode'] = episode
-                    agent.config['results']['test_reward'] = np.mean(greedyrewlist[0][-10:])
+                    agent.config['results']['test_reward'] = np.mean(test_rew_epis[0][-10:])
                     agent.config['results']['train_reward'] = np.mean(totrewlist[-100:])
                     agent.config['results']['all_reward'] = []  # fixme
 
@@ -257,7 +270,7 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
                                                                             agent.config['num_updates'] / 50000,
                                                                             agent.getlearnrate()))
             if is_test and params['plot']:
-                agent.plot([], (totrewlist, totrewavglist, greedyrewlist), reward_threshold, plt, plot=params['plot'],
+                agent.plot([], (totrewlist, test_rew_smooth, test_rew_epis), reward_threshold, plt, plot=params['plot'],
                            numplot=1, start_episode=start_episode)
 
         print(agent.config)
@@ -269,4 +282,4 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
         pass
     finally:
         env.close()
-    return np.mean(totrewlist[-numavg:]), agent.config, totrewlist, totrewavglist, greedyrewlist, reward_threshold
+    return np.mean(totrewlist[-numavg:]), agent.config, totrewlist, test_rew_smooth, test_rew_epis, reward_threshold

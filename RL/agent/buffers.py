@@ -7,7 +7,7 @@ import os
 
 class ReplayMemory(object):
     def __init__(self, max_size, observation_dims, observation_dtype,
-                 action_space: gym.Space, history: int, use_priority=False):
+                 action_space: gym.Space, history: int, discount, use_priority=False):
         assert len(list(observation_dims)) == 3 or len(list(observation_dims))==1
         if len(list(observation_dims)) == 3:
             assert observation_dims[2] == 1  # assuming 1 channel
@@ -17,18 +17,22 @@ class ReplayMemory(object):
             self.reshape = True
         else:
             self.reshape = False
+        self.discount = discount
+        self.history = history
+        self.max_size = max_size
+
+        self.curr_episode_idx = np.array([],dtype=np.int64)
         self.obs_mem = np.zeros([max_size] + list(observation_dims), dtype=observation_dtype)
         self.action_mem = np.zeros([max_size] + list(action_space.shape), dtype=action_space.dtype)
         self.reward_mem = np.zeros([max_size,1], dtype=np.float32)
         self.notdone_mem = np.zeros([max_size,1], dtype=np.float32)
-        self.step_mem = np.zeros([max_size,1], dtype=np.int32)
+        self.step_mem = np.zeros([max_size,1], dtype=np.int64)
         self.totalr_mem = np.zeros([max_size,1], dtype=np.float32)
-        self.totalr_mem[:] = np.nan
         self.info_mem = []
-        self.history = history
+
         assert history >= 0
         self.current_size = 0
-        self.max_size = max_size
+
         self.last_ind = -1
         self.start_ind = -1
         self.episodes = []
@@ -42,8 +46,14 @@ class ReplayMemory(object):
         self.last_ind = -1
         self.start_ind = -1
         self.current_size = 0
+        self.curr_episode_idx = np.array([], dtype=np.int64)
+        self.obs_mem *= 0
+        self.action_mem *= 0
+        self.reward_mem *= 0
+        self.notdone_mem *= 0
+        self.step_mem *= 0
+        self.totalr_mem *= 0
         self.info_mem = []
-        self.episodes = []
 
     def __getitem__(self, item):  # item has to be from 0 to len(mem)-1
         if isinstance(item, int) or isinstance(item, np.int64):
@@ -64,7 +74,6 @@ class ReplayMemory(object):
                    self.notdone_mem[idx], self.step_mem[idx], self.totalr_mem[idx]]
         if self.reshape:
             val[0] = val[0].reshape(val[0].shape[0],-1)
-        # print(val[0].shape)
         return val
     # def get_obs_only(self, item):
     #     if isinstance(item, int) or isinstance(item, np.int64):
@@ -114,7 +123,7 @@ class ReplayMemory(object):
             pr = self.get_priorities()
             self.max_priority = np.minimum(pr.max(), pr.mean() + 4 * pr.std())
 
-    def add(self, obs, action, reward, notdone, step, total_reward, extra_info=[]):
+    def add(self, obs, action, reward, notdone, step, extra_info=[]):
         if self.use_priority and random.random() < 0.05:
             raise NotImplementedError
             self.update_max()
@@ -129,7 +138,6 @@ class ReplayMemory(object):
         self.reward_mem[self.last_ind] = reward
         self.notdone_mem[self.last_ind] = notdone
         self.step_mem[self.last_ind] = step
-        self.totalr_mem[self.last_ind] = total_reward
         if len(self.info_mem) <= self.last_ind:
             self.info_mem.append(extra_info)
             # assert self.sizemem() == len(self.info_mem)
@@ -138,7 +146,17 @@ class ReplayMemory(object):
             # assert self.sizemem()==self.max_size
             self.start_ind = (self.last_ind + 1) % self.max_size
             self.info_mem[self.last_ind] = extra_info
+        #todo test this
+        self.curr_episode_idx = np.append(self.curr_episode_idx, [self.last_ind])
+        disc_rew = reward*self.discount**np.arange(len(self.curr_episode_idx)-1,-1,-1)
+        disc_rew = disc_rew.reshape(-1,1)
+        #print(disc_rew.shape,self.totalr_mem[self.curr_episode_idx].shape,self.curr_episode_idx.shape)
+        self.totalr_mem[self.curr_episode_idx] += disc_rew
+        #print(self.totalr_mem)
+        if notdone==0:
+            self.curr_episode_idx = np.array([],dtype=np.int64)
 
+        assert len(self.curr_episode_idx)<=self.sizemem(),"{} {} {}".format(len(self.curr_episode_idx),self.last_ind,notdone)
     def sizemem(self):
         return self.current_size
 

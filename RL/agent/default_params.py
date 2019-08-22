@@ -1,7 +1,7 @@
 def get_default(nameenv):
     if nameenv == 'CartPole-v0':
         params = {
-            "loss": "mse",
+            "loss": "clipmse",
             "optimizer": "adam",
             "terminal_life":False,
             "final_episode":0,
@@ -19,6 +19,7 @@ def get_default(nameenv):
             "copyQ": -1, # >=1 when policy=False
             "scalereward": 1,
             "limitreward": None,
+            "init_weight": False,
             "batch_norm": False,
             "probupdate": 1.0,
             "lambda": .97, # 0.0 when policy=False
@@ -26,12 +27,12 @@ def get_default(nameenv):
             "entropy":0.001,
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.01,
-            "linear_decay": 0.00001,#"decay": 0.995,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.001,
-            "eps_optim": 1e-8, # 1.5e-4 before
+            "linear_decay": 0.0001,#"decay": 0.995,  # Epsilon decay in epsilon greedy policies
+            "initial_learnrate": 0.0007,
+            "eps_optim": 1e-5, # 1.5e-4 before
             "decay_learnrate": 1,
             "discount": 0.99,
-            "batch_size": 256,
+            "batch_size": 512,
             "episodic": True,
             "hiddenlayers": [10],
             "sharedlayers":[60],
@@ -40,7 +41,7 @@ def get_default(nameenv):
             "activation": 'elu', # tanh, sigmoid, relu, elu
             "conv":False,
             "scaling": 'none',
-            "seed": -1
+            "seed": 1
             }
     elif nameenv == 'Acrobot-v1':
         params = {
@@ -86,11 +87,13 @@ def get_default(nameenv):
             }
     elif nameenv == 'LunarLander-v2':
         params = {
+            "baseline_env": False,
             'transition_net':False,
             "normalize":False,
             "priority_memory":False,
             "loss":"clipmse",
             "optimizer":"adam",
+            "init_weight":False,
             "initial_learnrate": 0.00018,
             "eps_optim": 1e-4,
             "decay_learnrate": 1, # every 1m updates
@@ -124,13 +127,15 @@ def get_default(nameenv):
             "activation": 'leaky_relu',
             "conv":False,
             "scaling": 'none',
-            "seed": 3,
+            "seed": 2,
             "final_episode": 0,
             "terminal_life": False
         }
     elif nameenv == 'BreakoutDeterministic-v4':
         params = {
+            "baseline_env": False,
             "terminal_life": True,
+            "optimizer": "adam",
             "normalize": False,
             "loss":"clipmse",
             "final_episode": 0,
@@ -144,8 +149,8 @@ def get_default(nameenv):
             "scaleobs": 1./255.,
             "limitreward": [-1., 1.],
             'doubleQ':False,
-            "copyQ": 1000,
-            "probupdate": 0.5,
+            "copyQ": 10000,
+            "probupdate": 0.35,
             "init_weight": True,
             "lambda": 0.,
             "entropy": 0.01,
@@ -155,9 +160,9 @@ def get_default(nameenv):
             "mineps": 0.1,
             "testeps": 0.05,
             "linear_decay": 0.000001,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.00025,
-            "momentum": 0.95,
-            "eps_optim": 1e-3,
+            "initial_learnrate": 6.5e-05,
+            "momentum": None,
+            "eps_optim": 1.5e-4,
             "discount": 0.99,
             "val_clip": False,
             "norm_clip": True,
@@ -165,15 +170,15 @@ def get_default(nameenv):
             "final_learnrate": 0.0001,
             "decay_learnrate": 1,
             "batch_size": 32,
-            "hiddenlayers": [256],
+            "hiddenlayers": [512],
             "regularization": 0,
             "activation":'relu',
-            "convlayers": [[8, 8, 4, 16], [4, 4, 2, 32]],
-            "scaling":'crop',
+            "convlayers": [[8, 8, 4, 32], [4, 4, 2, 64], [3, 3, 1, 64]],
+            "scaling":'scale',
             "dimdobs":(84,84,1),
             "path_exp": None,
             "conv":True,
-            "seed": -1,
+            "seed": 1,
             "sharedlayers": []}
     elif nameenv == 'Breakout-v4':
         params = {
@@ -191,7 +196,7 @@ def get_default(nameenv):
             "scaleobs": 1./255.,
             "limitreward": [-1., 1.],
             'doubleQ':False,
-            "copyQ":-1,
+            "copyQ":1000,
             "probupdate": 0.4,
             "init_weight": True,
             "lambda": 0.,
@@ -221,6 +226,54 @@ def get_default(nameenv):
             "path_exp": None,
             "conv":True,
             "seed": -1,
+            "sharedlayers": []}
+    elif nameenv == 'BreakoutNoFrameskip-v4':
+        params = {
+            "baseline_env": True,
+            "terminal_life": True,
+            "normalize": False,
+            "loss":"clipmse",
+            "final_episode": 0,
+            "memsize": 800000,
+            "randstart": 50000,
+            "policy":False,
+            "priority_memory": False,
+            "batch_norm": False,
+            "discounted_policy_grad":False,
+            "scalereward": 1,
+            "scaleobs": 1./255.,
+            "limitreward": [-1., 1.],
+            'doubleQ':False,
+            "copyQ":500,
+            "probupdate": 0.4,
+            "init_weight": True,
+            "lambda": 0.,
+            "entropy": 0.01,
+            "episodic":True,
+            "past": 3,
+            "eps":  1,  # Epsilon in epsilon greedy policies
+            "mineps": 0.1,
+            "testeps": 0.05,
+            "linear_decay": 0.000001,  # Epsilon decay in epsilon greedy policies
+            "initial_learnrate": 0.00015,
+            "momentum": 0.,
+            "eps_optim": 1e-4,
+            "discount": 0.98,
+            "val_clip": False,
+            "norm_clip": True,
+            "ratio_policy_learnrate": 1,
+            "final_learnrate": 0.0001,
+            "decay_learnrate": 1,
+            "batch_size": 32,
+            "hiddenlayers": [256],
+            "regularization": 0,
+            "activation":'relu',
+            "convlayers": [[8, 8, 4, 16], [4, 4, 2, 32]],
+            "scaling":'crop',
+            "dimdobs":(84,84,1),
+            "path_exp": None,
+            "conv":True,
+            "seed": 1,
             "sharedlayers": []}
     elif nameenv == 'Pong-v0':
         params = {

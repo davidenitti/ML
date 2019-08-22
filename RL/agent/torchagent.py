@@ -43,14 +43,6 @@ class deepQconv(object):
         torch.save(checkpoint, filename + ".pth")
 
     def __init__(self, observation_space, action_space, reward_range, userconfig):
-        if userconfig["path_exp"]:
-            self.log_dir = userconfig["path_exp"]
-            if os.path.exists(self.log_dir):
-                shutil.rmtree(self.log_dir)
-            os.makedirs(self.log_dir)
-        else:
-            self.log_dir = None
-
         self.config = userconfig
         self.observation_space = observation_space
         self.action_space = action_space
@@ -67,7 +59,7 @@ class deepQconv(object):
 
     def plot(self, w, lists, reward_threshold, plt, plot=True, numplot=0, start_episode=0):
         width = 15000
-        totrewlist, totrewavglist, greedyrewlist = lists
+        totrewlist, test_rew_smooth, test_rew_epis = lists
         if len(totrewlist) > 5:
             if plot:
                 fig = plt.figure(numplot)
@@ -83,12 +75,12 @@ class deepQconv(object):
 
             plt.plot(range(start_episode, start_episode + len(totrewlist)), totrewlist, color='red')
             # plt.plot(range(len(total_rew_discountlist)), [ddd-total_rew_discountlist[0]+totrewlist[0] for ddd in total_rew_discountlist], color='green')
-            plt.plot(greedyrewlist[1], totrewavglist, color='cyan')
+            plt.plot(test_rew_epis[1], test_rew_smooth, color='cyan')
 
-            plt.scatter(greedyrewlist[1], greedyrewlist[0], color='black')
+            plt.scatter(test_rew_epis[1], test_rew_epis[0], color='black')
 
             plt.plot([start_episode + max(0, len(totrewlist) - 1 - 20), start_episode + len(totrewlist) - 1],
-                     [np.mean(np.array(greedyrewlist[0][-20:])), np.mean(np.array(greedyrewlist[0][-20:]))], color='blue')
+                     [np.mean(np.array(test_rew_epis[0][-20:])), np.mean(np.array(test_rew_epis[0][-20:]))], color='blue')
 
             plt.plot([start_episode + max(0, len(totrewlist) - 1 - 100), start_episode + len(totrewlist) - 1],
                      [np.mean(np.array(totrewlist[-100:])), np.mean(np.array(totrewlist[-100:]))], color='black')
@@ -401,7 +393,7 @@ class deepQconv(object):
         else:
             # self.memory = ReplayMemory(self.config['memsize'],use_priority=self.config['priority_memory'])
             self.memory = buffers.ReplayMemory(self.config['memsize'], self.scaled_obs, self.observation_space.dtype,
-                                               self.action_space, self.config['past'])
+                                               self.action_space, self.config['past'], self.config['discount'])
         print((self.config['memsize'],) + tuple(n_input))
 
     def learn(self, force=False):
@@ -570,85 +562,87 @@ class deepQconv(object):
             startind = 0  # max(0, self.sizemem - self.config['memsize'])
             endind = self.memory.sizemem()
         n = endind - startind
-        if n >= 1:  # self.sizemem >= self.config['batch_size']:
-            allstate = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
-            listdiscounts = np.zeros((n, 1), dtype=np.float32)
+        if n >= 2:  # self.sizemem >= self.config['batch_size']:
+            logger.info('len policy steps {}'.format(n))
+            ind = np.arange(startind, endind)
+            allstate, actions, currew, notdonevec, step_vec, total_reward = self.memory[ind]
 
-            nextstates = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
-            currew = np.zeros((n, 1), dtype=np.float32)
-            notdonevec = np.zeros((n, 1), dtype=np.float32)
-            allactions = np.zeros((n,), dtype=np.int64)
-            i = 0
-            #  [0 state, 1 action, 2 reward, 3 notdone, 4 t,5 w]
-            Gtv = np.zeros((n, 1), dtype=np.float32)
-            if self.memory[endind - 1][3] == 1:
-                # last_state = Variable(torch.from_numpy(self.memory[endind - 1][0].reshape(1,-1)).float()).to(self.device)
-                totalRv = self.evalV(self.memory[endind - 1][0][None, ...], numpy=True)[
-                    0]  # self.V(last_state)[0, 0].cpu().item()
 
-                Gtv[0] = totalRv
-            else:
-                totalRv = self.memory[endind - 1][2]
-                Gtv[0] = self.memory[endind - 1][2]
-            for j in range(endind - 1, startind - 1, -1):
-                if i > 0:
-                    totalRv *= self.config['discount']
-                    totalRv += self.memory[j][2]
-                    Gtv[i] = totalRv
+            #nextstates, _, _, _, _, _ = self.memory[ind + 1]
+            #allactionsparse = np.eye(self.n_out, dtype=np.float32)[actions]
 
-                listdiscounts[i] = self.config['discount'] ** self.memory[j][4]
-                allstate[i] = self.memory[j][0]
-                if self.memory[j][3] == 1 and j + 1 < self.memory.sizemem():
-                    nextstates[i] = self.memory[j + 1][0]
-
-                currew[i, 0] = self.memory[j][2]
-                notdonevec[i, 0] = self.memory[j][3]
-                allactions[i] = self.memory[j][1]  # , self.n_out)
-                i += 1
-            assert i == n
+            # allstate = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
+            # listdiscounts = np.zeros((n, 1), dtype=np.float32)
+            #
+            # nextstates = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
+            # currew = np.zeros((n, 1), dtype=np.float32)
+            # notdonevec = np.zeros((n, 1), dtype=np.float32)
+            # allactions = np.zeros((n,), dtype=np.int64)
+            # i = 0
+            # #  [0 state, 1 action, 2 reward, 3 notdone, 4 t,5 w]
+            # Gtv = np.zeros((n, 1), dtype=np.float32)
+            # if self.memory[endind - 1][3] == 1:
+            #     # last_state = Variable(torch.from_numpy(self.memory[endind - 1][0].reshape(1,-1)).float()).to(self.device)
+            #     totalRv = self.evalV(self.memory[endind - 1][0][None, ...], numpy=True)[0]  # self.V(last_state)[0, 0].cpu().item()
+            #     Gtv[0] = totalRv
+            # else:
+            #     totalRv = self.memory[endind - 1][2]
+            #     Gtv[0] = self.memory[endind - 1][2]
+            # for j in range(endind - 1, startind - 1, -1):
+            #     if i > 0:
+            #         totalRv *= self.config['discount']
+            #         totalRv += self.memory[j][2]
+            #         Gtv[i] = totalRv
+            #
+            #     listdiscounts[i] = self.config['discount'] ** self.memory[j][4]
+            #     allstate[i] = self.memory[j][0]
+            #     if self.memory[j][3] == 1 and j + 1 < self.memory.sizemem():
+            #         nextstates[i] = self.memory[j + 1][0]
+            #
+            #     currew[i, 0] = self.memory[j][2]
+            #     notdonevec[i, 0] = self.memory[j][3]
+            #     allactions[i] = self.memory[j][1]  # , self.n_out)
+            #     i += 1
+            # assert i == n
 
             # allstate = Variable(torch.from_numpy(allstate).float()).to(self.device)
             Vallstate = self.evalV(allstate, numpy=False)
-            Vnext = torch.cat((Variable(torch.zeros(1, 1, device=self.device)), Vallstate[:-1]), 0).detach()
+            Vnext = torch.cat((Vallstate[1:],torch.zeros(1, 1, device=self.device)), 0).detach()
 
-            notdonevec = Variable(torch.from_numpy(notdonevec)).to(self.device, non_blocking=True)
-            currew = Variable(torch.from_numpy(currew)).to(self.device, non_blocking=True)
-            Gtv = Variable(torch.from_numpy(Gtv)).to(self.device, non_blocking=True)
-            allactions = Variable(torch.from_numpy(allactions)).to(self.device, non_blocking=True)
+            notdonevec = torch.from_numpy(notdonevec).to(self.device, non_blocking=True)
+            currew = torch.from_numpy(currew).to(self.device, non_blocking=True)
+            total_reward = torch.from_numpy(total_reward).to(self.device, non_blocking=True)
+            actions = torch.from_numpy(actions).to(self.device, non_blocking=True)
             # Vnext = np.append([[0]],Vallstate[:-1],axis=0)
             if self.config['episodic']:
                 targetV = currew + self.config['discount'] * Vnext * notdonevec
-                # targetQ = currew + self.config['discount'] * self.maxqbatch(nextstates).reshape(-1, 1) * notdonevec
 
-                if notdonevec[0, 0] == 1:
-                    targetV[0] = Vallstate[0]
-                    targetV = targetV[1:]
-                    Vallstate = Vallstate[1:]
-                    listdiscounts = listdiscounts[1:]
-                    Gtv = Gtv[1:]
-                    allstate = allstate[1:]
-                    allactions = allactions[1:]
+                if notdonevec[-1, 0] == 1:
+                    total_reward += Vallstate[-1,0] *(self.memory.discount ** torch.arange( len(total_reward) - 1, -1, -1,device=self.device).float()).reshape(-1,1)
+                    targetV[-1] = Vallstate[-1]
+                    targetV = targetV[:-1]
+                    Vallstate = Vallstate[:-1]
+                    total_reward = total_reward[:-1]
+                    allstate = allstate[:-1]
+                    actions = actions[:-1]
 
                 if np.random.random() < 0.1:
                     #print(notdonevec[0, 0])
                     print('currew', (currew).reshape(-1, )[0:5], (currew).reshape(-1, )[-5:])
-                    print('Gtv', (Gtv).reshape(-1, )[0:5], (Gtv).reshape(-1, )[-5:])
+                    print('Gtv', (total_reward).reshape(-1, )[0:5], (total_reward).reshape(-1, )[-5:])
                     print('targetV', (targetV).reshape(-1, )[0:5], (targetV).reshape(-1, )[-5:])
                     print('Vstate', Vallstate.reshape(-1, )[0:5], Vallstate.reshape(-1, )[-5:])
                     print("notdonevec",(notdonevec).reshape(-1, )[0:5], (notdonevec).reshape(-1, )[-5:])
 
-                targetV = targetV * (1 - self.config['lambda']) + Gtv * self.config['lambda']
-                # print(Gtv,targetV)
-                # targetQ = targetQ*(1-self.config['lambda']) + Gt*self.config['lambda']
+                targetV = targetV * (1 - self.config['lambda']) + total_reward * self.config['lambda']
+
                 if self.config['discounted_policy_grad'] == False:
                     listdiscounts = 1.
                 else:
-                    listdiscounts = torch.from_numpy(listdiscounts).to(self.device, non_blocking=True)
-                targetp = 1 * listdiscounts * (targetV - Vallstate)
-                targetp = (targetp - targetp.mean()) / (targetp.std() + 0.000001)
+                    raise NotImplementedError
+                targetp = listdiscounts * (targetV - Vallstate)
+                targetp = (targetp - targetp.mean()) / (targetp.std() + 0.00001)
                 targetp = targetp.detach()
-                # print(targetp.shape)
-                # targetp = listdiscounts*(Gt- self.sess.run(self.V, feed_dict={self.x: allstate}))
             else:
                 raise Exception('non-episodic not implemented')
                 exit(-1)
@@ -661,7 +655,8 @@ class deepQconv(object):
                 print('prob', pr,"logit",logit)
 
             entropy = self.config['entropy'] * torch.mean(-torch.sum(pr * logp, 1))
-            logpolicy = targetp.view(-1, ) * self.policy_criterion(logit, allactions).view(-1, )
+            print(targetp.shape,self.policy_criterion(logit, actions).shape)
+            logpolicy = targetp.view(-1, ) * self.policy_criterion(logit, actions).view(-1, )
             errorpolicy = torch.mean(logpolicy) - entropy
 
             if self.config['normalize']:
@@ -679,7 +674,8 @@ class deepQconv(object):
             # errorpolicy = errorpolicy/errorpolicy.detach()
             loss = errorpolicy + 3 * v_loss  # fixme
             if torch.isnan(logpolicy).any():
-                print("a", allactions, logpolicy, targetp, "logit", logit)
+                print("a", actions, logpolicy, targetp, "logit", logit)
+                raise Exception('error logpolicy')
             loss.backward()
             self.optimizer.step()
 

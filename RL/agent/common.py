@@ -85,15 +85,19 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter.format(self, record)
 
 
-def init_logger(log_path, level='INFO', mode='w'):
+def init_logger(log_path, level='INFO', mode='a'):
     """
     initialize the logger in the main script
     """
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('dropbox').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+
     level_console = getattr(logging,level)
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
 
-    formatter = logging.Formatter('[%(name)s][%(levelname)s] %(message)s (%(filename)s:%(lineno)d)')  # %(asctime)s -
+    formatter = logging.Formatter('%(asctime)s [%(name)s][%(levelname)s] %(message)s (%(filename)s:%(lineno)d)')  # %(asctime)s -
     if log_path:
         handler = logging.FileHandler(log_path, mode=mode)
         handler.setLevel(logging.DEBUG)

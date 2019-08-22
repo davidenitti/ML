@@ -23,17 +23,21 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
         scaling = agent.config['scaling']
     else:
         scaling = 'none'
-    ob = env.reset()
-    ob = preprocess(ob, agent.observation_space, agent.scaled_obs, type=scaling)
+    obs_cur = env.reset()
+    if not ('baseline_env' in agent.config and agent.config['baseline_env']):
+        obs_cur = preprocess(obs_cur, agent.observation_space, agent.scaled_obs, type=scaling)
 
-    if agent.config['terminal_life']:
-        last_lives = -1
+        if agent.config['terminal_life']:
+            last_lives = -1
+    else:
+        if len(obs_cur.shape)==3:
+            obs_cur = np.moveaxis(obs_cur, -1, 0)
 
     if useConv == False:
-        ob = ob.reshape(-1, )
-    ob1 = np.copy(ob)
+        obs_cur = obs_cur.reshape(-1, )
+    obs_cur_stack = np.copy(obs_cur)
     for _ in range(agent.config["past"]):
-        ob1 = np.concatenate((ob1, ob), 0)
+        obs_cur_stack = np.concatenate((obs_cur_stack, obs_cur), 0)
 
     if 'transition_net' in agent.config and agent.config['transition_net']: #fixme render and
         agent.state_list=[[],[]]
@@ -41,21 +45,19 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
     else:
         update_state = False
 
-    min_reward=float("inf")
-    max_reward = float("-inf")
     max_qval = float("-inf")
     for t in range(num_steps):
         if sleep > 0:
             time.sleep(sleep)
         if agent.config['policy']:
-            a = agent.actpolicy(ob1, episode)
+            a = agent.actpolicy(obs_cur_stack, episode)
         else:
-            a = agent.act(ob1, episode,update_state=update_state)
+            a = agent.act(obs_cur_stack, episode,update_state=update_state)
 
         start_time = time.time()
-        (obnew, rr, done, _info) = env.step(a)
+        (obs_next, rr, done, _info) = env.step(a)
         start_time2 = time.time()
-        if agent.config['terminal_life']:
+        if agent.config['terminal_life'] and not ('baseline_env' in agent.config and agent.config['baseline_env']):
             if _info['ale.lives'] < last_lives:
                 terminal_memory = True
             else:
@@ -63,30 +65,34 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
             last_lives = _info['ale.lives']
         else:
             terminal_memory = done
+        if ('baseline_env' in agent.config and agent.config['baseline_env']):
+            if hasattr(env,'was_real_done'): # when using EpisodicLifeEnv wrapper
+                done = env.was_real_done
 
-        #print(reward, done,terminal_memory, _info['ale.lives'])
-        obnew = preprocess(obnew, agent.observation_space, agent.scaled_obs, type=scaling)
+        if not ('baseline_env' in agent.config and agent.config['baseline_env']):
+            obs_next = preprocess(obs_next, agent.observation_space, agent.scaled_obs, type=scaling)
+            reward = rr*agent.config['scalereward']
+        else:
+            # fixme rewards are clipped when baseline_env is enabled!!!!!!
+            reward = rr
+            obs_next = np.moveaxis(obs_next, -1, 0)
 
-        min_reward = min(min_reward,rr)
-        max_reward = max(max_reward, rr)
-
-        reward = rr*agent.config['scalereward']
         if agent.config['limitreward'] is not None:
             limitreward = min(agent.config['limitreward'][1], max(agent.config['limitreward'][0], reward))
         else:
             limitreward = reward
 
         if useConv == False:
-            obnew = obnew.reshape(-1, )
+            obs_next = obs_next.reshape(-1, )
 
-        if len(ob.shape) == 3:
-            obnew1 = np.concatenate((ob1[obnew.shape[0]:, :, :], obnew), 0)
+        if len(obs_cur.shape) == 3:
+            obs_next_stack = np.concatenate((obs_cur_stack[obs_next.shape[0]:, :, :], obs_next), 0)
         else:
-            obnew1 = np.concatenate((ob1[ob.shape[0]:], obnew))
+            obs_next_stack = np.concatenate((obs_cur_stack[obs_cur.shape[0]:], obs_next))
 
         #old
-        #agent.memory.add([ob1, a, limitreward, 1. - 1. * terminal_memory, t, None])
-        agent.memory.add(ob, a, limitreward, 1. - 1. * terminal_memory, t, np.nan)
+        #agent.memory.add([obs_cur_stack, a, limitreward, 1. - 1. * terminal_memory, t, None])
+        agent.memory.add(obs_cur, a, limitreward, 1. - 1. * terminal_memory, t)
         start_time3 = time.time()
         if learn and (not agent.config['policy']):
             cost += agent.learn()
@@ -100,20 +106,21 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
 
         if (t % 200 == 0 or done):
             if agent.config['policy']:
-                logger.debug("{} episode {} step {} done {} V {} limitedrew {}".format(agent.config["path_exp"], episode, t, done, agent.evalV(ob1[None,...], True), limitreward))
+                logger.debug("{} episode {} step {} done {} V {} limitedrew {}".format(agent.config["path_exp"], episode, t, done, agent.evalV(obs_cur_stack[None,...], True), limitreward))
             else:
-                q_val = agent.evalQ(ob1[None,...])
+                q_val = agent.evalQ(obs_cur_stack[None,...])
                 max_qval = max(max_qval,np.max(q_val))
                 logger.debug("{} episode {} step {} done {} Q {} limitedrew {}".format(agent.config["path_exp"], episode, t, done, 'Q', q_val, limitreward))
 
-        ob1 = obnew1
-        ob = obnew
+        obs_cur_stack = obs_next_stack
+        obs_cur = obs_next
 
         start_time4 = time.time()
-        if render and t % 3 == 0:  # render every X steps (X=1)
+        if render and t % 1 == 0:  # render every X steps (X=1)
             env.render()
 
-        if done: break
+        if done:
+            break
         if t % 5 == 0 and False:#fixme
             print("time step",time.time()-start_time, start_time2 - start_time,start_time3 - start_time2,
                   start_time4-start_time3,time.time() - start_time4)
