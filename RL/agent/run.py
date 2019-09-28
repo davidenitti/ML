@@ -94,7 +94,7 @@ def upload_res(callback, process_upload=None, upload_checkpoint=False, parallel=
 
 def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
     params = getparams(params)
-    logger.info('params' + str(params))
+    logger.info('Params' + str(params))
     if params['plot'] != True:
         import matplotlib
         matplotlib.use('pdf')
@@ -123,7 +123,8 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
     else:
         env = gym.make(nameenv)
         reward_range = env.reward_range
-        env.seed(params["seed"])
+        if params['seed'] is not None:
+            env.seed(params["seed"])
 
     if params['monitor'] == True:  # store performance and video
         from gym import wrappers
@@ -143,7 +144,7 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
     for p in params:
         logger.debug(p + " " + str(params[p]))
 
-    if params["seed"] > 0:
+    if params["seed"] is not None:
         np.random.seed(params["seed"])
         logger.debug("seed " + str(params["seed"]))
     try:

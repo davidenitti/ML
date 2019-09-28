@@ -36,7 +36,7 @@ class deepQconv(object):
             json.dump(self.config, input_file, indent=3)
         if self.config['save_mem']:
             logger.info('saving memory')
-            buffers.save_zipped_pickle(self.memory, filename + "_mem.p",zip=False)
+            buffers.save_zipped_pickle(self.memory, filename + "_mem.p", zip=False)
         checkpoint = {"optimizer": self.optimizer.state_dict()}
         for m in self.models:
             checkpoint[m] = self.models[m].state_dict()
@@ -80,7 +80,8 @@ class deepQconv(object):
             plt.scatter(test_rew_epis[1], test_rew_epis[0], color='black')
 
             plt.plot([start_episode + max(0, len(totrewlist) - 1 - 20), start_episode + len(totrewlist) - 1],
-                     [np.mean(np.array(test_rew_epis[0][-20:])), np.mean(np.array(test_rew_epis[0][-20:]))], color='blue')
+                     [np.mean(np.array(test_rew_epis[0][-20:])), np.mean(np.array(test_rew_epis[0][-20:]))],
+                     color='blue')
 
             plt.plot([start_episode + max(0, len(totrewlist) - 1 - 100), start_episode + len(totrewlist) - 1],
                      [np.mean(np.array(totrewlist[-100:])), np.mean(np.array(totrewlist[-100:]))], color='black')
@@ -137,8 +138,9 @@ class deepQconv(object):
                 return max(self.config['mineps'], self.config['eps'] * self.config['exp_decay'] ** episode)
             else:
                 return max(self.config['mineps'],
-                       self.config['eps'] - (self.config['eps'] - self.config['mineps']) * self.config['linear_decay'] *
-                       self.config['num_updates'])
+                           self.config['eps'] - (self.config['eps'] - self.config['mineps']) * self.config[
+                               'linear_decay'] *
+                           self.config['num_updates'])
 
     def getlearnrate(self):
         return self.learnrate
@@ -344,7 +346,6 @@ class deepQconv(object):
                 else:
                     self.errorlist2 = 0.5 * delta2 ** 2
 
-
             if self.config['doubleQ']:
                 # fixme to remove (old tf implementation)
                 if regul != []:
@@ -410,37 +411,39 @@ class deepQconv(object):
             if self.memory.sizemem() > self.config['randstart']:
                 self.config['num_updates'] += 1
                 ind = self.memory.sample(self.config['batch_size'])
-                allstate, actions, currew, notdonevec, step_vec, maxsteps_reward = self.memory[ind]
-                nextstates, _, _ , _, _, _ = self.memory[ind+1]
-                allactionsparse = np.eye(self.n_out,dtype=np.float32)[actions]
-                i = 0
-                #  [0 state, 1 action, 2 reward, 3 notdone, 4 step, 5 total_reward]
+                allstate, actions, currew, notdonevec, step_vec, total_reward, step2end = self.memory[ind]
+                nextstates, _, _, _, _, _, _ = self.memory[ind + 1]
+                allactionsparse = np.eye(self.n_out, dtype=np.float32)[actions]
                 if self.config['lambda'] > 0:
                     raise NotImplementedError
-                    #fixme old code won't work anymore
-                    for j in ind:
-                        if (np.random.random() < 0.01 or maxsteps_reward[j,0].isnan()):
-                            limitd = 500
-                            gamma = 1.
-                            offset = 0
-                            nextstate = 1  # next state relative index
-
-                            n = j
-                            while nextstate != None and offset < limitd:
-                                maxsteps_reward[i, 0] += gamma * self.memory[n][2]
-                                gamma = gamma * self.config['discount']
-                                if n + nextstate * 2 >= self.memory.sizemem() or not (offset + nextstate < limitd) or \
-                                        self.memory[n][3] == 0:
-                                    maxsteps_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0][None,...]) * \
-                                                             self.memory[n][3]
-                                    nextstate = None
-                                else:
-                                    offset += nextstate
-                                    n = j + offset
-                            self.memory[j][5] = maxsteps_reward[i, 0]
-                        else:
-                            maxsteps_reward[i, 0] = self.memory[j][5]
-                        i += 1
+                # i = 0
+                # #  [0 state, 1 action, 2 reward, 3 notdone, 4 step, 5 total_reward]
+                # if self.config['lambda'] > 0:
+                #     raise NotImplementedError
+                #     #fixme old code won't work anymore
+                #     for j in ind:
+                #         if (np.random.random() < 0.01 or total_reward[j,0].isnan()):
+                #             limitd = 500
+                #             gamma = 1.
+                #             offset = 0
+                #             nextstate = 1  # next state relative index
+                #
+                #             n = j
+                #             while nextstate != None and offset < limitd:
+                #                 total_reward[i, 0] += gamma * self.memory[n][2]
+                #                 gamma = gamma * self.config['discount']
+                #                 if n + nextstate * 2 >= self.memory.sizemem() or not (offset + nextstate < limitd) or \
+                #                         self.memory[n][3] == 0:
+                #                     total_reward[i, 0] += gamma * self.maxq(self.memory[n + nextstate][0][None,...]) * \
+                #                                              self.memory[n][3]
+                #                     nextstate = None
+                #                 else:
+                #                     offset += nextstate
+                #                     n = j + offset
+                #             self.memory[j][5] = total_reward[i, 0]
+                #         else:
+                #             total_reward[i, 0] = self.memory[j][5]
+                #         i += 1
 
                 flag = np.random.random() < 0.5 and self.fulldouble
                 self.optimizer.zero_grad()
@@ -464,8 +467,9 @@ class deepQconv(object):
                     nextstates = torch.from_numpy(nextstates).to(self.device, non_blocking=True).float()
                     currew = torch.from_numpy(currew.reshape((-1,))).to(self.device, non_blocking=True)
                     notdonevec = torch.from_numpy(notdonevec.reshape((-1,))).to(self.device, non_blocking=True)
-                    maxsteps_reward = torch.from_numpy(maxsteps_reward.reshape((-1,))).to(self.device,
-                                                                                                  non_blocking=True)
+                    if self.config['lambda'] > 0:
+                        total_reward = torch.from_numpy(total_reward.reshape((-1,))).to(self.device, non_blocking=True)
+                        step2end = torch.from_numpy(step2end.reshape((-1,))).to(self.device, non_blocking=True)
                     shared_features = self.shared(allstate)
                     if self.config['copyQ'] > 0:
                         next_shared_features = self.copy_shared(nextstates)
@@ -474,7 +478,9 @@ class deepQconv(object):
                         next_shared_features = self.shared(nextstates)
                         maxQnext = torch.max(self.Q(next_shared_features), dim=1)[0]
                     maxQnext = maxQnext.detach()
-
+                    if self.config['lambda'] > 0:
+                        # todo finish
+                        total_reward += self.memory.discount ** (step2end + 1) * maxQlast
                     if 'transition_net' in self.config and self.config['transition_net']:
                         pred_next_features_reward = shared_features + self.T(
                             torch.cat((shared_features, allactionsparse), 1))
@@ -488,7 +494,7 @@ class deepQconv(object):
                     else:
                         target = (currew + self.config["discount"] * maxQnext) * (1. - self.config['lambda'])
                     if self.config['lambda'] > 0:
-                        target += maxsteps_reward * self.config['lambda']
+                        target += total_reward * self.config['lambda']
 
                     if self.config['normalize']:
                         scale_target = 1. * torch.abs(target).mean().detach() + 0.001
@@ -540,10 +546,9 @@ class deepQconv(object):
                     torch.nn.utils.clip_grad_value_(self.learnable_parameters, 1)
                 self.optimizer.step()
 
-
         return self.config['num_updates']
 
-    def plot_state(self, plt, state_list):  # fixme use plt instead of plt0
+    def plot_state(self, plt, state_list):
         fig = plt.figure(2)
         fig.canvas.set_window_title(str(self.config["path_exp"]) + " " + str(self.config))
 
@@ -556,20 +561,19 @@ class deepQconv(object):
         self.update_learning_rate()
         for m in self.models:
             self.models[m].train()
-        # todo fix indexing with new indexes
         if startind is None or endind is None:
             print('to check')
             startind = 0  # max(0, self.sizemem - self.config['memsize'])
             endind = self.memory.sizemem()
         n = endind - startind
         if n >= 2:  # self.sizemem >= self.config['batch_size']:
+            # todo to check
             logger.info('len policy steps {}'.format(n))
             ind = np.arange(startind, endind)
-            allstate, actions, currew, notdonevec, step_vec, total_reward = self.memory[ind]
+            allstate, actions, currew, notdonevec, step_vec, total_reward, step2end = self.memory[ind]
 
-
-            #nextstates, _, _, _, _, _ = self.memory[ind + 1]
-            #allactionsparse = np.eye(self.n_out, dtype=np.float32)[actions]
+            # nextstates, _, _, _, _, _ = self.memory[ind + 1]
+            # allactionsparse = np.eye(self.n_out, dtype=np.float32)[actions]
 
             # allstate = np.zeros((n,) + self.memory[startind][0].shape, dtype=np.float32)
             # listdiscounts = np.zeros((n, 1), dtype=np.float32)
@@ -607,7 +611,7 @@ class deepQconv(object):
 
             # allstate = Variable(torch.from_numpy(allstate).float()).to(self.device)
             Vallstate = self.evalV(allstate, numpy=False)
-            Vnext = torch.cat((Vallstate[1:],torch.zeros(1, 1, device=self.device)), 0).detach()
+            Vnext = torch.cat((Vallstate[1:], torch.zeros(1, 1, device=self.device)), 0).detach()
 
             notdonevec = torch.from_numpy(notdonevec).to(self.device, non_blocking=True)
             currew = torch.from_numpy(currew).to(self.device, non_blocking=True)
@@ -616,9 +620,11 @@ class deepQconv(object):
             # Vnext = np.append([[0]],Vallstate[:-1],axis=0)
             if self.config['episodic']:
                 targetV = currew + self.config['discount'] * Vnext * notdonevec
-
                 if notdonevec[-1, 0] == 1:
-                    total_reward += Vallstate[-1,0] *(self.memory.discount ** torch.arange( len(total_reward) - 1, -1, -1,device=self.device).float()).reshape(-1,1)
+                    #todo to check
+                    discount_vec = self.memory.discount ** torch.arange(len(total_reward) - 1, -1, -1,
+                                                                        device=self.device).float()
+                    total_reward += (Vallstate[-1, 0] - currew[-1, 0]) * discount_vec.reshape(-1, 1)
                     targetV[-1] = Vallstate[-1]
                     targetV = targetV[:-1]
                     Vallstate = Vallstate[:-1]
@@ -627,12 +633,12 @@ class deepQconv(object):
                     actions = actions[:-1]
 
                 if np.random.random() < 0.1:
-                    #print(notdonevec[0, 0])
+                    # print(notdonevec[0, 0])
                     print('currew', (currew).reshape(-1, )[0:5], (currew).reshape(-1, )[-5:])
                     print('Gtv', (total_reward).reshape(-1, )[0:5], (total_reward).reshape(-1, )[-5:])
                     print('targetV', (targetV).reshape(-1, )[0:5], (targetV).reshape(-1, )[-5:])
                     print('Vstate', Vallstate.reshape(-1, )[0:5], Vallstate.reshape(-1, )[-5:])
-                    print("notdonevec",(notdonevec).reshape(-1, )[0:5], (notdonevec).reshape(-1, )[-5:])
+                    print("notdonevec", (notdonevec).reshape(-1, )[0:5], (notdonevec).reshape(-1, )[-5:])
 
                 targetV = targetV * (1 - self.config['lambda']) + total_reward * self.config['lambda']
 
@@ -649,30 +655,33 @@ class deepQconv(object):
 
             self.optimizer.zero_grad()
             logit = self.eval_policy(allstate, numpy=False, logit=True)
-            pr, logp = torch.nn.functional.softmax(logit,dim=1), torch.nn.functional.log_softmax(logit,dim=1)
+            pr, logp = torch.nn.functional.softmax(logit, dim=1), torch.nn.functional.log_softmax(logit, dim=1)
 
             if np.random.random() < 0.001:
-                print('prob', pr,"logit",logit)
+                print('prob', pr, "logit", logit)
 
             entropy = self.config['entropy'] * torch.mean(-torch.sum(pr * logp, 1))
-            print(targetp.shape,self.policy_criterion(logit, actions).shape)
+            print(targetp.shape, self.policy_criterion(logit, actions).shape)
             logpolicy = targetp.view(-1, ) * self.policy_criterion(logit, actions).view(-1, )
             errorpolicy = torch.mean(logpolicy) - entropy
 
             if self.config['normalize']:
-                scale_target = 1. * torch.abs(targetV).mean().detach() + 0.001
+                scale_target = (targetV.detach()**2).mean()
                 if self.avg_target is None:
                     self.avg_target = scale_target
                 else:
                     self.avg_target = 0.99 * self.avg_target + 0.01 * scale_target
-                v_loss = self.criterion(Vallstate / self.avg_target, targetV.detach() / self.avg_target)
+                scaling = torch.sqrt(self.avg_target) + 0.001
+                v_loss = self.criterion(Vallstate / scaling, targetV.detach() / scaling)
                 if np.random.random() < 0.001:
                     print("avg target", self.avg_target.data.item(), "v loss", v_loss.mean().data.item())
             else:
+                self.avg_target=1
                 v_loss = self.criterion(Vallstate, targetV.detach())
-            # v_loss = v_loss/v_loss.detach()
-            # errorpolicy = errorpolicy/errorpolicy.detach()
-            loss = errorpolicy + 3 * v_loss  # fixme
+            #v_loss = v_loss/(torch.abs(v_loss).detach()+0.01)
+            # errorpolicy = errorpolicy/(torch.abs(errorpolicy.detach())+0.01)
+            logger.info("error policy {} v loss {} scale_V {}".format(errorpolicy.item(),v_loss.item(),scaling.item()))
+            loss = errorpolicy + 3*v_loss  # fixme
             if torch.isnan(logpolicy).any():
                 print("a", actions, logpolicy, targetp, "logit", logit)
                 raise Exception('error logpolicy')
@@ -763,8 +772,8 @@ class deepQconv(object):
         else:
             lg = self.logitpolicy(self.shared(input))
             if torch.isnan(lg).any():
-                print("nan",lg,"\n",input,"\n",self.shared(input))
-            assert torch.isnan(lg).any()==False
+                print("nan", lg, "\n", input, "\n", self.shared(input))
+            assert torch.isnan(lg).any() == False
             prob = torch.nn.functional.softmax(lg)
         if numpy:
             return prob.cpu().data.numpy()
@@ -775,7 +784,7 @@ class deepQconv(object):
         for m in self.models:
             self.models[m].eval()
         assert observation.ndim > 1
-        input = Variable(torch.from_numpy(observation)).float()
+        input = torch.from_numpy(observation).float()
         input = input.to(self.device, non_blocking=True)
         v = self.V(self.shared(input))
         if numpy:
@@ -831,7 +840,7 @@ class deepQconv(object):
     def actpolicy(self, observation, episode=None):
         for m in self.models:
             self.models[m].eval()
-        prob = self.eval_policy(observation[None,...], numpy=True)[0]
+        prob = self.eval_policy(observation[None, ...], numpy=True)[0]
         if episode is None or episode < 0:
             action = np.argmax(prob)
         else:
@@ -842,6 +851,7 @@ class deepQconv(object):
         return action
 
     def update_learning_rate(self):
-        self.learnrate = self.config['initial_learnrate'] * self.config['decay_learnrate'] ** (self.config['num_updates'] / 1000000.0)
+        self.learnrate = self.config['initial_learnrate'] * self.config['decay_learnrate'] ** (
+                    self.config['num_updates'] / 1000000.0)
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = self.learnrate

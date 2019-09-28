@@ -42,7 +42,7 @@ if __name__ == '__main__':
     resultsdir = './' + nameenv
 
     env = gym.wrappers.Monitor(env, resultsdir, force=True)# env.monitor.start(resultsdir, force=True)
-    print(env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range, gym.envs.registry.spec(nameenv).trials)
+    print(env.observation_space, env.action_space, env.spec.max_episode_steps, env.reward_range, gym.envs.registry.spec(nameenv).trials)
     if nameenv == 'Acrobot-v0':
         env.reward_range = (-1., 0.)
 
@@ -63,7 +63,7 @@ if __name__ == '__main__':
             "regularization": [0.00001, 0.00000001],
             "momentum": 0.05,
             "scale": 3.,
-            "file": None,
+            "path_exp": None,
             "seed": seed}
     elif nameenv == 'CartPole-v0':
         params = {
@@ -81,7 +81,7 @@ if __name__ == '__main__':
             "hiddenlayers": [300],
             "regularization": [0.000000, 0.00000000],
             "momentum": 0.0,
-            "file": None,
+            "path_exp": None,
             "scale": None,
             "seed": seed}
     else:
@@ -100,10 +100,10 @@ if __name__ == '__main__':
             "hiddenlayers": [300],
             "regularization": [0.0000, 0.0000000],
             "momentum": 0.0,
-            "file": None,
+            "path_exp": None,
             "seed": seed}
     agent = agents.deepQAgent(env.observation_space, env.action_space, env.reward_range, **params)
-    num_steps = env.spec.timestep_limit
+    num_steps = env.spec.max_episode_steps
     avg = 0.
     oldavg = 0.
 

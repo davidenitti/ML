@@ -8,7 +8,7 @@ def get_default(nameenv):
             'transition_net': False,
             "priority_memory": False,
             "transition_weight": 0.01,
-            "normalize": False,
+            "normalize": True,
             "memsize": 20000, # number of past experience tuples to store for learning
             "randstart": 50,
             "scaleobs": 1,
@@ -22,13 +22,13 @@ def get_default(nameenv):
             "init_weight": False,
             "batch_norm": False,
             "probupdate": 1.0,
-            "lambda": .97, # 0.0 when policy=False
+            "lambda": .95, # 0.0 when policy=False
             "past": 0,
             "entropy":0.001,
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.01,
             "linear_decay": 0.0001,#"decay": 0.995,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.0007,
+            "initial_learnrate": 0.0002,
             "eps_optim": 1e-5, # 1.5e-4 before
             "decay_learnrate": 1,
             "discount": 0.99,
@@ -41,7 +41,7 @@ def get_default(nameenv):
             "activation": 'elu', # tanh, sigmoid, relu, elu
             "conv":False,
             "scaling": 'none',
-            "seed": 1
+            "seed": None
             }
     elif nameenv == 'Acrobot-v1':
         params = {
@@ -81,7 +81,7 @@ def get_default(nameenv):
             "activation": 'leaky_relu',
             "conv":False,
             "scaling": 'none',
-            "seed": -1,
+            "seed": None,
             "terminal_life": False,
             "final_episode": 0
             }
@@ -127,7 +127,7 @@ def get_default(nameenv):
             "activation": 'leaky_relu',
             "conv":False,
             "scaling": 'none',
-            "seed": 2,
+            "seed": None,
             "final_episode": 0,
             "terminal_life": False
         }
@@ -178,11 +178,13 @@ def get_default(nameenv):
             "dimdobs":(84,84,1),
             "path_exp": None,
             "conv":True,
-            "seed": 1,
+            "seed": None,
             "sharedlayers": []}
     elif nameenv == 'Breakout-v4':
         params = {
+            "baseline_env": False,
             "terminal_life": True,
+            "optimizer": "adam",
             "normalize": False,
             "loss":"clipmse",
             "final_episode": 0,
@@ -196,8 +198,8 @@ def get_default(nameenv):
             "scaleobs": 1./255.,
             "limitreward": [-1., 1.],
             'doubleQ':False,
-            "copyQ":1000,
-            "probupdate": 0.4,
+            "copyQ": 10000,
+            "probupdate": 0.35,
             "init_weight": True,
             "lambda": 0.,
             "entropy": 0.01,
@@ -207,25 +209,25 @@ def get_default(nameenv):
             "mineps": 0.1,
             "testeps": 0.05,
             "linear_decay": 0.000001,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.00015,
-            "momentum": 0.,
-            "eps_optim": 1e-4,
-            "discount": 0.98,
+            "initial_learnrate": 6.5e-05,
+            "momentum": None,
+            "eps_optim": 1.5e-4,
+            "discount": 0.99,
             "val_clip": False,
             "norm_clip": True,
             "ratio_policy_learnrate": 1,
             "final_learnrate": 0.0001,
             "decay_learnrate": 1,
             "batch_size": 32,
-            "hiddenlayers": [256],
+            "hiddenlayers": [512],
             "regularization": 0,
             "activation":'relu',
-            "convlayers": [[8, 8, 4, 16], [4, 4, 2, 32]],
-            "scaling":'crop',
+            "convlayers": [[8, 8, 4, 32], [4, 4, 2, 64], [3, 3, 1, 64]],
+            "scaling":'scale',
             "dimdobs":(84,84,1),
             "path_exp": None,
             "conv":True,
-            "seed": -1,
+            "seed": None,
             "sharedlayers": []}
     elif nameenv == 'BreakoutNoFrameskip-v4':
         params = {
@@ -273,7 +275,7 @@ def get_default(nameenv):
             "dimdobs":(84,84,1),
             "path_exp": None,
             "conv":True,
-            "seed": 1,
+            "seed": None,
             "sharedlayers": []}
     elif nameenv == 'Pong-v0':
         params = {
@@ -302,7 +304,7 @@ def get_default(nameenv):
             "path_exp": None,
             "conv":True,
             "diffstate":False,
-            "seed": 1}
+            "seed": None}
     else:
         raise NotImplemented
     return params

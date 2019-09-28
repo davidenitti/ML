@@ -8,7 +8,7 @@ import os
 class ReplayMemory(object):
     def __init__(self, max_size, observation_dims, observation_dtype,
                  action_space: gym.Space, history: int, discount, use_priority=False):
-        assert len(list(observation_dims)) == 3 or len(list(observation_dims))==1
+        assert len(list(observation_dims)) == 3 or len(list(observation_dims)) == 1
         if len(list(observation_dims)) == 3:
             assert observation_dims[2] == 1  # assuming 1 channel
             observation_dims = list(observation_dims[:2])
@@ -21,13 +21,14 @@ class ReplayMemory(object):
         self.history = history
         self.max_size = max_size
 
-        self.curr_episode_idx = np.array([],dtype=np.int64)
+        self.curr_episode_idx = np.array([], dtype=np.int64)
         self.obs_mem = np.zeros([max_size] + list(observation_dims), dtype=observation_dtype)
         self.action_mem = np.zeros([max_size] + list(action_space.shape), dtype=action_space.dtype)
-        self.reward_mem = np.zeros([max_size,1], dtype=np.float32)
-        self.notdone_mem = np.zeros([max_size,1], dtype=np.float32)
-        self.step_mem = np.zeros([max_size,1], dtype=np.int64)
-        self.totalr_mem = np.zeros([max_size,1], dtype=np.float32)
+        self.reward_mem = np.zeros([max_size, 1], dtype=np.float32)
+        self.notdone_mem = np.zeros([max_size, 1], dtype=np.float32)
+        self.step_mem = np.zeros([max_size, 1], dtype=np.int64)
+        self.step2end_mem = np.zeros([max_size, 1], dtype=np.int64)
+        self.totalr_mem = np.zeros([max_size, 1], dtype=np.float32)
         self.info_mem = []
 
         assert history >= 0
@@ -52,6 +53,7 @@ class ReplayMemory(object):
         self.reward_mem *= 0
         self.notdone_mem *= 0
         self.step_mem *= 0
+        self.step2end_mem *= 0
         self.totalr_mem *= 0
         self.info_mem = []
 
@@ -63,36 +65,20 @@ class ReplayMemory(object):
         if self.history > 0:
             idx_list = np.array([np.arange(i - self.history, i + 1) for i in item])
             idx_list = np.maximum(0, idx_list)
-            #if min(item) < self.history:
+            # if min(item) < self.history:
             #    assert len(self.info_mem) <= self.last_ind + 1  # to check fixme (maybe used only in policy learning
             idx = (self.start_ind + idx_list + self.max_size) % self.max_size
-            val = [self.obs_mem[idx], self.action_mem[idx[:,-1]], self.reward_mem[idx[:,-1]],
-                   self.notdone_mem[idx[:,-1]], self.step_mem[idx[:,-1]], self.totalr_mem[idx[:,-1]]]
+            val = [self.obs_mem[idx], self.action_mem[idx[:, -1]], self.reward_mem[idx[:, -1]],
+                   self.notdone_mem[idx[:, -1]], self.step_mem[idx[:, -1]], self.totalr_mem[idx[:, -1]],
+                   self.step2end_mem[idx[:, -1]]]
         else:
             idx = (self.start_ind + item + self.max_size) % self.max_size
             val = [self.obs_mem[idx], self.action_mem[idx], self.reward_mem[idx],
-                   self.notdone_mem[idx], self.step_mem[idx], self.totalr_mem[idx]]
+                   self.notdone_mem[idx], self.step_mem[idx], self.totalr_mem[idx], self.step2end_mem[idx]]
         if self.reshape:
-            val[0] = val[0].reshape(val[0].shape[0],-1)
+            val[0] = val[0].reshape(val[0].shape[0], -1)
         return val
-    # def get_obs_only(self, item):
-    #     if isinstance(item, int) or isinstance(item, np.int64):
-    #         item = np.array([item])
-    #     assert (item < self.current_size).all()  # change to >=0 for policy #TODO
-    #     assert (item >= 0).all()
-    #     if self.history > 0:
-    #         idx_list = np.array([np.arange(i - self.history, i + 1) for i in item])
-    #         idx_list = np.maximum(0, idx_list)
-    #         if min(item) < self.history:
-    #             assert len(self.info_mem) <= self.last_ind + 1  # to check fixme (maybe used only in policy learning
-    #         idx = (self.start_ind + idx_list + self.max_size) % self.max_size
-    #         val = self.obs_mem[idx]
-    #     else:
-    #         idx = (self.start_ind + item + self.max_size) % self.max_size
-    #         val = self.obs_mem[idx]
-    #     if self.reshape:
-    #         val = val.reshape(val.shape[0], -1)
-    #     return val
+
     def sample(self, batch_size):
         if self.use_priority:
             prob_mem = self.get_priorities() + 0.000001
@@ -146,41 +132,48 @@ class ReplayMemory(object):
             # assert self.sizemem()==self.max_size
             self.start_ind = (self.last_ind + 1) % self.max_size
             self.info_mem[self.last_ind] = extra_info
-        #todo test this
+        # todo test this
+        self.step2end_mem[self.curr_episode_idx] += 1  # todo check if self.last_ind=1 or 0 (now 0)
         self.curr_episode_idx = np.append(self.curr_episode_idx, [self.last_ind])
-        disc_rew = reward*self.discount**np.arange(len(self.curr_episode_idx)-1,-1,-1)
-        disc_rew = disc_rew.reshape(-1,1)
-        #print(disc_rew.shape,self.totalr_mem[self.curr_episode_idx].shape,self.curr_episode_idx.shape)
+        disc_rew = reward * self.discount ** np.arange(len(self.curr_episode_idx) - 1, -1, -1)
+        disc_rew = disc_rew.reshape(-1, 1)
+        # print(disc_rew.shape,self.totalr_mem[self.curr_episode_idx].shape,self.curr_episode_idx.shape)
         self.totalr_mem[self.curr_episode_idx] += disc_rew
-        #print(self.totalr_mem)
-        if notdone==0:
-            self.curr_episode_idx = np.array([],dtype=np.int64)
 
-        assert len(self.curr_episode_idx)<=self.sizemem(),"{} {} {}".format(len(self.curr_episode_idx),self.last_ind,notdone)
+        # print(self.totalr_mem)
+        if notdone == 0:
+            self.curr_episode_idx = np.array([], dtype=np.int64)
+
+        assert len(self.curr_episode_idx) <= self.sizemem(), "{} {} {}".format(len(self.curr_episode_idx),
+                                                                               self.last_ind, notdone)
+
     def sizemem(self):
         return self.current_size
+
 
 def save_zipped_pickle(obj, filename, zip=False, protocol=-1):
     with open(filename, 'wb') as f:
         pickle.dump(obj, f, protocol)
     if zip:
-        os.system('zip '+filename+'.zip '+filename)
+        os.system('zip ' + filename + '.zip ' + filename)
         os.remove(filename)
+
 
 def load_zipped_pickle(filename):
     if os.path.exists(filename + '.zip'):
-        os.system('unzip '+filename + '.zip')
+        os.system('unzip ' + filename + '.zip')
     with open(filename, 'rb') as f:
         loaded_object = pickle.load(f)
     if os.path.exists(filename + '.zip'):
         os.remove(filename)
     return loaded_object
 
+
 if __name__ == '__main__':
-    mem = ReplayMemory(10, [2,3,1], np.float32, np.array([1]), history=3)
+    mem = ReplayMemory(10, [2, 3, 1], np.float32, np.array([1]), history=3)
     for i in range(4):
-        mem.add(np.array([[i,i+0.5,i],[i,i+0.5,i]]).reshape(2,3,1), np.array([i]), 1,1,i,np.nan)
-    save_zipped_pickle(mem,'tmp.mem')
+        mem.add(np.array([[i, i + 0.5, i], [i, i + 0.5, i]]).reshape(2, 3, 1), np.array([i]), 1, 1, i, np.nan)
+    save_zipped_pickle(mem, 'tmp.mem')
     mem = load_zipped_pickle('tmp.mem')
     idx = mem.sample(2)
     print(idx)

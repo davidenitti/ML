@@ -57,7 +57,7 @@ _game_envs['retro'] = {
 
 
 
-def build_env(env_id, env_type=None, num_env=1, batch=False, seed=1, reward_scale=1.0,
+def build_env(env_id, env_type=None, num_env=1, batch=False, seed=None, reward_scale=1.0,
               gamestate=None, frame_stack=False,logger_dir=None):
     #ncpu = multiprocessing.cpu_count()
 

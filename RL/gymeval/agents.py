@@ -63,14 +63,14 @@ class deepQAgent(object):
 
     def save(self, filename=None):
         if filename is None:
-            filename = self.config['file']
+            filename = self.config["path_exp"]
         with open(filename + ".p", "wb") as input_file:
             pickle.dump((self.observation_space, self.action_space, self.reward_range, self.config), input_file)
         save_path = self.saver.save(self.sess, filename + ".tf")
 
     def __init__(self, observation_space, action_space, reward_range, **userconfig):
-        if userconfig["file"] is not None and os.path.isfile(userconfig["file"] + ".p"):
-            with open(userconfig["file"] + ".p", "rb") as input_file:
+        if userconfig["path_exp"] is not None and os.path.isfile(userconfig["path_exp"] + ".p"):
+            with open(userconfig["path_exp"] + ".p", "rb") as input_file:
                 self.observation_space, self.action_space, self.reward_range, self.config = pickle.load(input_file)
                 # overwrite some parameter
                 self.config["initial_learnrate"] = userconfig["initial_learnrate"]
@@ -102,7 +102,7 @@ class deepQAgent(object):
                 "hiddenlayers": [300],
                 "regularization": [0.0001, 0.000001],
                 "momentum": 0.1,
-                "file": None,
+                "path_exp": None,
                 "seed": None}
             self.config.update(userconfig)
 
@@ -179,11 +179,11 @@ class deepQAgent(object):
         self.sess = tf.Session()
         self.memory = []
         self.errmemory = []
-        if self.config['file'] is None or (not os.path.isfile(self.config['file'] + ".tf")):
+        if self.config["path_exp"] is None or (not os.path.isfile(self.config["path_exp"] + ".tf")):
             self.sess.run(tf.initialize_all_variables())
         else:
-            print ("loading " + self.config['file'] + ".tf")
-            self.saver.restore(self.sess, self.config['file'] + ".tf")
+            print ("loading " + self.config["path_exp"] + ".tf")
+            self.saver.restore(self.sess, self.config["path_exp"] + ".tf")
         self.sess.run(tf.assign(self.global_step, 0))
 
     def evalQ(self, state, action):
@@ -316,7 +316,7 @@ class deepQAgent(object):
 
 def do_rollout(agent, env, episode, num_steps=None, render=False):
     if num_steps == None:
-        num_steps = env.spec.timestep_limit
+        num_steps = env.spec.max_episode_steps
     total_rew = 0.
     cost = 0.
 
