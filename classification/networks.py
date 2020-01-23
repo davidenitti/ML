@@ -134,7 +134,7 @@ class Net(nn.Module):
         if self.debug:
             print(x.shape)
 
-        x = self.last_pool(x, x.shape[1])
+        x = self.last_pool(x, x.shape[2])
         if self.debug:
             print(x.shape)
         x = x.view(x.shape[0], -1)
