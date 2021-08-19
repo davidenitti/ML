@@ -4,11 +4,13 @@ import os
 import torch
 from torch import Tensor
 from pytorch_lightning import Callback, LightningModule, Trainer
-import time,random
+import time, random
 import torchvision
+
 
 def sampler(batch_size, dim, device, length):
     return torch.randn((batch_size, dim), device=device)
+
 #    return torch.rand(batch_size, dim, device=device) * 2 * length - length
 
 class TensorboardGenerativeModelImageSampler(Callback):
@@ -33,15 +35,15 @@ class TensorboardGenerativeModelImageSampler(Callback):
     """
 
     def __init__(
-        self,
-        num_samples: int = 3,
-        nrow: int = 8,
-        padding: int = 2,
-        normalize: bool = False,
-        norm_range: Optional[Tuple[int, int]] = None,
-        scale_each: bool = False,
-        pad_value: int = 0,
-        length: int = 2,
+            self,
+            num_samples: int = 3,
+            nrow: int = 8,
+            padding: int = 2,
+            normalize: bool = False,
+            norm_range: Optional[Tuple[int, int]] = None,
+            scale_each: bool = False,
+            pad_value: int = 0,
+            length: int = 2,
     ) -> None:
         """
         Args:
@@ -69,9 +71,9 @@ class TensorboardGenerativeModelImageSampler(Callback):
         self.pad_value = pad_value
         self.length = length
 
-    def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule,outputs,
-        batch,        batch_idx: int,        dataloader_idx: int) -> None:
-        if trainer.global_step % 500 != 0 or trainer.global_step==0:
+    def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs,
+                           batch, batch_idx: int, dataloader_idx: int) -> None:
+        if trainer.global_step % 500 != 0 or trainer.global_step == 0:
             return
         z = sampler(self.num_samples, pl_module.hparams.latent_dim, pl_module.device, self.length)
 
@@ -79,7 +81,7 @@ class TensorboardGenerativeModelImageSampler(Callback):
         with torch.no_grad():
             pl_module.eval()
             img = pl_module(z)
-            if isinstance(img,list):
+            if isinstance(img, list):
                 images = []
                 for img_i in img:
                     if img_i is None:
@@ -87,7 +89,7 @@ class TensorboardGenerativeModelImageSampler(Callback):
                     else:
                         images.append(torch.nn.functional.interpolate(img_i, size=(256, 256)))
             else:
-                images = torch.nn.functional.interpolate(img, size=(256,256))
+                images = torch.nn.functional.interpolate(img, size=(256, 256))
             pl_module.train()
 
         if isinstance(img, list):
@@ -106,7 +108,7 @@ class TensorboardGenerativeModelImageSampler(Callback):
                     scale_each=self.scale_each,
                     pad_value=self.pad_value,
                 )
-                str_title = f"{pl_module.__class__.__name__}_images{2**(i+2)}"
+                str_title = f"{pl_module.__class__.__name__}_images{2 ** (i + 2)}"
                 trainer.logger.experiment.add_image(str_title, grid, global_step=trainer.global_step)
 
         else:
@@ -127,7 +129,7 @@ class TensorboardGenerativeModelImageSampler(Callback):
             trainer.logger.experiment.add_image(str_title, grid, global_step=trainer.global_step)
 
             grid_real = torchvision.utils.make_grid(
-                tensor=batch[0],
+                tensor=batch[0][:self.nrow*self.nrow],
                 nrow=self.nrow,
                 padding=self.padding,
                 normalize=self.normalize,
@@ -139,10 +141,11 @@ class TensorboardGenerativeModelImageSampler(Callback):
             trainer.logger.experiment.add_image(str_title, grid_real, global_step=trainer.global_step)
 
         time.sleep(random.random())
-        if not os.path.exists(os.path.join(trainer.log_dir,'images')):
-            os.makedirs(os.path.join(trainer.log_dir,'images'),exist_ok=True)
+        if not os.path.exists(os.path.join(trainer.log_dir, 'images')):
+            os.makedirs(os.path.join(trainer.log_dir, 'images'), exist_ok=True)
         torchvision.utils.save_image(grid.cpu(), os.path.join(trainer.log_dir,
                                                               'images', 'sampled{:07d}.png'.format(trainer.global_step)))
+
 
 class LatentDimInterpolator(Callback):
     """
@@ -159,14 +162,14 @@ class LatentDimInterpolator(Callback):
     """
 
     def __init__(
-        self,
-        interpolate_epoch_interval: int = 20,
-        range_start: int = -1,
-        range_end: int = 1,
-        steps: int = 11,
-        num_samples: int = 2,
-        normalize: bool = True,
-        callback=None
+            self,
+            interpolate_epoch_interval: int = 20,
+            range_start: int = -1,
+            range_end: int = 1,
+            steps: int = 11,
+            num_samples: int = 2,
+            normalize: bool = True,
+            callback=None
     ):
         """
         Args:
@@ -184,14 +187,14 @@ class LatentDimInterpolator(Callback):
         self.num_samples = num_samples
         self.normalize = normalize
         self.steps = steps
-        self.callback=callback
+        self.callback = callback
 
     def on_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        if self.callback is not None and trainer.global_step>10:
+        if self.callback is not None and trainer.global_step > 10:
             self.callback(False)
 
     def on_batch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        if trainer.global_step % 500 != 0 or trainer.global_step==0:
+        if trainer.global_step % 500 != 0 or trainer.global_step == 0:
             return
         if (trainer.current_epoch + 1) % self.interpolate_epoch_interval == 0:
             images = self.interpolate_latent_space(
@@ -204,10 +207,11 @@ class LatentDimInterpolator(Callback):
             grid = torchvision.utils.make_grid(images, nrow=num_rows, normalize=self.normalize)
             str_title = f'{pl_module.__class__.__name__}_latent_space'
             trainer.logger.experiment.add_image(str_title, grid, global_step=trainer.global_step)
-            if not os.path.exists(os.path.join(trainer.log_dir,'images')):
-                os.makedirs(os.path.join(trainer.log_dir,'images'))
+            if not os.path.exists(os.path.join(trainer.log_dir, 'images')):
+                os.makedirs(os.path.join(trainer.log_dir, 'images'))
             torchvision.utils.save_image(grid.cpu(), os.path.join(trainer.log_dir,
-                                                          'images', 'latent{:07d}.png'.format(trainer.global_step)))
+                                                                  'images', 'latent{:07d}.png'.format(trainer.global_step)))
+
     def interpolate_latent_space(self, pl_module: LightningModule, latent_dim: int) -> List[Tensor]:
         images = []
         with torch.no_grad():
@@ -227,14 +231,14 @@ class LatentDimInterpolator(Callback):
                     if isinstance(img, list):
                         idx = -1
                         img_tmp = img[idx]
-                        while img_tmp is None and abs(idx)<len(img):
+                        while img_tmp is None and abs(idx) < len(img):
                             idx -= 1
                             img_tmp = img[idx]
                         img = img_tmp
                         if img is None:
                             img = torch.zeros((self.num_samples, *pl_module.img_dim))
                         else:
-                            img = torch.nn.functional.interpolate(img, size=(pl_module.img_dim[-2],pl_module.img_dim[-1]))
+                            img = torch.nn.functional.interpolate(img, size=(pl_module.img_dim[-2], pl_module.img_dim[-1]))
                     if len(img.size()) == 2:
                         img = img.view(self.num_samples, *pl_module.img_dim)
 
@@ -249,7 +253,8 @@ class LatentDimInterpolator(Callback):
 def compute_gradient_penalty(D, real_samples, fake_samples, idx=None):
     """Calculates the gradient penalty loss for WGAN GP"""
     # Random weight term for interpolation between real and fake samples
-    alpha = torch.rand((real_samples.size(0), 1, 1, 1), device=real_samples.device)# Tensor(np.random.random((real_samples.size(0), 1, 1, 1)),device=real_samples.device)
+    alpha = torch.rand((real_samples.size(0), 1, 1, 1),
+                       device=real_samples.device)  # Tensor(np.random.random((real_samples.size(0), 1, 1, 1)),device=real_samples.device)
     # Get random interpolation between real and fake samples
     interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
 

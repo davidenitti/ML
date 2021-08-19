@@ -160,7 +160,7 @@ def get_experiment(name):
         'wgan1_custom': "--batch_size 48 --l2_loss_weight 0 --version 3 --loss wgangp"
             " --weight_decay 0.0 --beta1 0.0 --use_std --use_avg --norm_disc Identity --custom_conv --speed_transition 50000",
         'wgan_custom': "--batch_size 80 --l2_loss_weight 0 --version 3 --loss wgangp"
-                " --weight_decay 0.0 --beta1 0 --use_std --use_avg --norm_disc Identity --custom_conv --speed_transition 20000"
+                " --weight_decay 0.0 --beta1 0 --use_std --use_avg --norm_disc Identity --custom_conv --speed_transition 40000"
     }
     str_exp = experiments[name] + ' --name ' + name
     return str_exp.split(' ')

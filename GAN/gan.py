@@ -133,11 +133,24 @@ class DCGAN(pl.LightningModule):
         if self.version >= 3:
             self.num_scales = int(math.log2(real.shape[-1])) - 2
             idx = self.get_idx(self.num_scales)
+            lower_idx = min(self.num_scales, math.floor(idx))
             higher_idx = min(self.num_scales, math.ceil(idx))
+            w1 = weight_formula(lower_idx, idx)
+            w2 = weight_formula(higher_idx, idx)
+            sum_w = w1 + w2
+            w1 /= sum_w
+            w2 /= sum_w
+
+            real = real[:real.shape[0]//max(1,higher_idx)]
             size = real.shape[-1] // (2 ** (self.num_scales-higher_idx))
             real = torch.nn.functional.interpolate(real, size=(size, size), mode="area")
+            if lower_idx != higher_idx:
+                low_res_real = torch.nn.functional.avg_pool2d(real, (2, 2))
+                low_res_real = torch.nn.functional.upsample(low_res_real, scale_factor=2, mode='nearest')
+                real = w1 * low_res_real + w2 * real
+
             if batch_idx % 200 == 0:
-                print('current size real', size)
+                print('current size real', real.shape,'idx',idx,'w',w1,w2)
         if batch_idx % ratio == 0:
             d_opt.zero_grad()
             d_x = self._disc_step(real)
@@ -184,7 +197,6 @@ class DCGAN(pl.LightningModule):
 
     def get_idx(self, max_val):
         idx = self.global_step / self.speed_transition
-        idx = idx ** 0.5
         if idx >= max_val:
             idx = max_val
         return idx
