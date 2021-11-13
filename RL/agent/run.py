@@ -1,7 +1,6 @@
-'''
-
+"""
 @author: Davide Nitti
-'''
+"""
 
 from . import common
 from . import default_params
@@ -15,8 +14,6 @@ import gym
 import gym.spaces
 from multiprocessing import Process
 import logging
-
-
 import argparse
 import os
 import json
@@ -92,23 +89,27 @@ def upload_res(callback, process_upload=None, upload_checkpoint=False, parallel=
     return process_upload
 
 
-def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
-    params = getparams(params)
-    logger.info('Params' + str(params))
-    if params['plot'] != True:
-        import matplotlib
-        matplotlib.use('pdf')
-    else:
+def plt_init(plot):
+    if plot:
         import matplotlib
         # matplotlib.use('Agg')
         # matplotlib.use("Qt5agg")
         import matplotlib.pyplot as plt
-
         plt.rcParams['image.interpolation'] = 'nearest'
+        plt.ion()
+    else:
+        import matplotlib
+        matplotlib.use('pdf')
+    return plt
 
-    nameenv = params['target']
 
-    reward_threshold = gym.envs.registry.spec(nameenv).reward_threshold
+def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
+    params = getparams(params)
+    logger.info('Params' + str(params))
+    plt = plt_init(params['plot'])
+    name_env = params['target']
+
+    reward_threshold = gym.envs.registry.spec(name_env).reward_threshold
     if 'baseline_env' in params and params['baseline_env']:
         if params['path_exp']:
             stats_path = os.path.join(params["res_dir"], 'stats')
@@ -116,12 +117,12 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
                 os.makedirs(stats_path)
         else:
             stats_path = None
-        env = env_utils.build_env(nameenv, env_type=None, num_env=1, batch=False,
+        env = env_utils.build_env(name_env, env_type=None, num_env=1, batch=False,
                                   seed=params["seed"], reward_scale=params['scalereward'], gamestate=None,
                                   logger_dir=stats_path)
-        reward_range = env.reward_range#env.envs[0].reward_range
+        reward_range = env.reward_range  # env.envs[0].reward_range
     else:
-        env = gym.make(nameenv)
+        env = gym.make(name_env)
         reward_range = env.reward_range
         if params['seed'] is not None:
             env.seed(params["seed"])
@@ -152,8 +153,6 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
         num_steps = env.spec.max_episode_steps
         avg = None
         process_upload = None
-        if params['plot']:
-            plt.ion()
 
         totrewlist = []
         test_rew_epis = [[], []]
@@ -284,3 +283,7 @@ def main(params=[], callback=None, upload_ckp=False, numavg=100, sleep=0.0):
     finally:
         env.close()
     return np.mean(totrewlist[-numavg:]), agent.config, totrewlist, test_rew_smooth, test_rew_epis, reward_threshold
+
+
+if __name__ == '__main__':
+    main(None)

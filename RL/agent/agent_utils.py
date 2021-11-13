@@ -14,6 +14,7 @@ def onehot(i, n, dtype=np.float32):
 
 def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, discount=1,
                learn=True, sleep=0.):
+    baseline_env = ('baseline_env' in agent.config and agent.config['baseline_env'])
     if num_steps == None:
         num_steps = env.spec.max_episode_steps
     total_rew = 0.
@@ -24,9 +25,8 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
     else:
         scaling = 'none'
     obs_cur = env.reset()
-    if not ('baseline_env' in agent.config and agent.config['baseline_env']):
+    if not baseline_env:
         obs_cur = preprocess(obs_cur, agent.observation_space, agent.scaled_obs, type=scaling)
-
         if agent.config['terminal_life']:
             last_lives = -1
     else:
@@ -57,7 +57,7 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
         start_time = time.time()
         (obs_next, rr, done, _info) = env.step(a)
         start_time2 = time.time()
-        if agent.config['terminal_life'] and not ('baseline_env' in agent.config and agent.config['baseline_env']):
+        if agent.config['terminal_life'] and not baseline_env:
             if _info['ale.lives'] < last_lives:
                 terminal_memory = True
             else:
@@ -65,15 +65,16 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
             last_lives = _info['ale.lives']
         else:
             terminal_memory = done
-        if ('baseline_env' in agent.config and agent.config['baseline_env']):
+        if baseline_env:
             if hasattr(env,'was_real_done'): # when using EpisodicLifeEnv wrapper
                 done = env.was_real_done
 
-        if not ('baseline_env' in agent.config and agent.config['baseline_env']):
+        if not baseline_env:
             obs_next = preprocess(obs_next, agent.observation_space, agent.scaled_obs, type=scaling)
             reward = rr*agent.config['scalereward']
         else:
             # fixme rewards are clipped when baseline_env is enabled!!!!!!
+            logger.warning('rewards are clipped when baseline_env is enabled')
             reward = rr
             obs_next = np.moveaxis(obs_next, -1, 0)
 
@@ -82,7 +83,7 @@ def do_rollout(agent, env, episode, num_steps=None, render=False, useConv=True, 
         else:
             limitreward = reward
 
-        if useConv == False:
+        if not useConv:
             obs_next = obs_next.reshape(-1, )
 
         if len(obs_cur.shape) == 3:

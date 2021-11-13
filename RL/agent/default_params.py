@@ -28,7 +28,7 @@ def get_default(nameenv):
             "eps": 0.5,  # Epsilon in epsilon greedy policies
             "mineps": 0.01,
             "linear_decay": 0.0001,#"decay": 0.995,  # Epsilon decay in epsilon greedy policies
-            "initial_learnrate": 0.0002,
+            "initial_learnrate": 0.0003,
             "eps_optim": 1e-5, # 1.5e-4 before
             "decay_learnrate": 1,
             "discount": 0.99,
@@ -150,7 +150,7 @@ def get_default(nameenv):
             "limitreward": [-1., 1.],
             'doubleQ':False,
             "copyQ": 10000,
-            "probupdate": 0.35,
+            "probupdate": 0.4,
             "init_weight": True,
             "lambda": 0.,
             "entropy": 0.01,

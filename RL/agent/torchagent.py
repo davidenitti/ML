@@ -15,9 +15,6 @@ from . import buffers
 
 from .agent_utils import onehot, vis
 import json
-import pickle
-
-import copy
 
 import matplotlib.pyplot as plt0
 
@@ -618,6 +615,8 @@ class deepQconv(object):
             total_reward = torch.from_numpy(total_reward).to(self.device, non_blocking=True)
             actions = torch.from_numpy(actions).to(self.device, non_blocking=True)
             # Vnext = np.append([[0]],Vallstate[:-1],axis=0)
+            if (notdonevec[:-1,0]==0).any():
+                raise NotImplementedError
             if self.config['episodic']:
                 targetV = currew + self.config['discount'] * Vnext * notdonevec
                 if notdonevec[-1, 0] == 1:
@@ -670,11 +669,11 @@ class deepQconv(object):
                 if self.avg_target is None:
                     self.avg_target = scale_target
                 else:
-                    self.avg_target = 0.99 * self.avg_target + 0.01 * scale_target
+                    self.avg_target = 0.995 * self.avg_target + 0.005 * scale_target
                 scaling = torch.sqrt(self.avg_target) + 0.001
                 v_loss = self.criterion(Vallstate / scaling, targetV.detach() / scaling)
                 if np.random.random() < 0.001:
-                    print("avg target", self.avg_target.data.item(), "v loss", v_loss.mean().data.item())
+                    print("avg target", self.avg_target.data.item()**0.5, "v loss", v_loss.mean().data.item())
             else:
                 self.avg_target=1
                 v_loss = self.criterion(Vallstate, targetV.detach())
